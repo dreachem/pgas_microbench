@@ -1,0 +1,44 @@
+PGAS Microbenchmarks
+
+These contains a set of simple microbenchmarks for various PGAS libraries and
+languages.
+
+
+TESTS:
+
+----------------------------------------------
+PUT Bandwidth Test:
+
+PUT M-sized message N times.
+
+Bandwidth =  M*N / (t2 - t1)
+
+-----------------------------------------------
+GET Bandwidth Test
+
+GET M-sized message N times.
+
+Bandwidth = M*N / (t2 - t1)
+
+-----------------------------------------------
+Latency Test:
+
+PUT small message to target address and then GET from target address N times.
+
+Latency = (t2 - t1) / N
+
+-----------------------------------------------
+
+PUT Duplex Bandwidth Test:
+
+Pair of processes PUT M-sized message N times to eachother.
+
+Bandwidth = M*N / (t2 - t1)    (take average)
+
+-----------------------------------------------
+
+GET Duplex Bandwidth Test:
+
+Pair of processes GET M-sized message N times to eachother.
+
+Bandwidth = M*N / (t2 - t1)    (take average)
