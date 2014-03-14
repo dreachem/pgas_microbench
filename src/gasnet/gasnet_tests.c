@@ -23,6 +23,9 @@ typedef enum {
   P2P
 } sync_type_t;
 
+void print_sendrecv_address();
+void p2psync_test();
+
 void handler_sync_notify(gasnet_token_t token, gasnet_handlerarg_t partner);
 void do_sync_notify(int partner);
 void do_sync_wait(int partner);
@@ -34,8 +37,8 @@ void run_putput_latency_test(sync_type_t sync);
 void run_getget_latency_test(sync_type_t sync);
 void run_put_bw_test(int do_bulk);
 void run_get_bw_test(int do_bulk);
-void run_put_duplex_bw_test(int do_bulk);
-void run_get_duplex_bw_test(int do_bulk);
+void run_put_bidir_bw_test(int do_bulk);
+void run_get_bidir_bw_test(int do_bulk);
 
 
 const size_t SEGMENT_SIZE = 30*1024*1024;
@@ -45,9 +48,18 @@ const long long BW_NITER = 10000;
 
 int my_node;
 int num_nodes;
+int num_active_nodes;
 int partner;
 gasnet_seginfo_t *seginfo;
-int *sync_notify_buffer;
+
+static void *segment_start;
+static int *send_buffer;
+static int *recv_buffer;
+static double *stats_buffer;
+static int *sync_notify_buffer;
+
+#define REMOTE_ADDRESS(a,p) \
+    (a) + ((char *)seginfo[(p)].addr - (char*)segment_start)/(sizeof *(a))
 
 
 static gasnet_handlerentry_t handlers[] = {
@@ -73,10 +85,11 @@ int main(int argc, char **argv)
     }
 
     if (num_nodes % 2 == 0) {
-        partner = (my_node + num_nodes/2) % num_nodes;
+        num_active_nodes = num_nodes;
     } else {
-        partner = (my_node + (num_nodes-1)/2) % (num_nodes-1);
+        num_active_nodes = num_nodes - 1;
     }
+    partner = (my_node + num_active_nodes/2) % num_active_nodes;
 
     /* attach segment */
     ret = gasnet_attach(handlers, nhandlers,
@@ -96,9 +109,21 @@ int main(int argc, char **argv)
         gasnet_exit(1);
     }
 
+    segment_start = seginfo[my_node].addr;
+
+    /* initialize address of send buffer */
+    send_buffer = segment_start;
+
+    /* initialize address of receive buffer */
+    recv_buffer =
+        &send_buffer[MAX_MSG_SIZE/(sizeof send_buffer[0]) + 1];
+
+    /* initialize address of stats buffer */
+    stats_buffer = (double *)
+        &recv_buffer[MAX_MSG_SIZE/(sizeof send_buffer[0]) + 1];
+
     /* initialize address of sync notify buffer */
-    sync_notify_buffer = (int *)((char *)seginfo[my_node].addr +
-                        MAX_MSG_SIZE + sizeof(double)*num_nodes);
+    sync_notify_buffer = (int *) &stats_buffer[num_nodes + 1];
 
     /* run tests */
     run_putget_latency_test();
@@ -108,35 +133,79 @@ int main(int argc, char **argv)
     run_getget_latency_test(P2P);
     run_put_bw_test(0);
     run_get_bw_test(0);
-    run_put_duplex_bw_test(0);
-    run_get_duplex_bw_test(0);
+    run_put_bidir_bw_test(0);
+    run_get_bidir_bw_test(0);
 
-    return 0;
+    gasnet_exit(0);
 }
 
+#ifdef _DEBUG
+void print_sendrecv_address()
+{
+    int *origin_send, *target_recv;
+    int *origin_recv, *target_send;
+
+    origin_send = send_buffer;
+    target_recv = REMOTE_ADDRESS(recv_buffer, partner);
+    origin_recv = recv_buffer;
+    target_send = REMOTE_ADDRESS(send_buffer, partner);
+
+    printf("%d: osend: %p, trecv: %p, orecv: %p, tsend: %p\n",
+            my_node, origin_send, target_recv, origin_recv, target_send);
+}
+
+void p2psync_test()
+{
+    const int delay = 5;
+    if (my_node < partner) {
+        printf("%d doing work\n", my_node);
+        sleep(delay);
+        printf("%d sending sync to %d\n", my_node, partner);
+        do_sync_notify(partner);
+        printf("%d waiting on sync from %d\n", my_node, partner);
+        do_sync_wait(partner);
+        printf("%d received sync from %d\n", my_node, partner);
+    } else if (my_node < num_active_nodes) {
+        printf("%d waiting on sync from %d\n", my_node, partner);
+        do_sync_wait(partner);
+        printf("%d received sync from %d\n", my_node, partner);
+        printf("%d doing work\n", my_node);
+        sleep(delay);
+        printf("%d sending sync to %d\n", my_node, partner);
+        do_sync_notify(partner);
+    }
+}
+#endif
 
 
 void run_putget_latency_test()
 {
-    int *origin, *target;
+    int *origin_send, *target_recv;
+    int *origin_recv, *target_send;
     int i;
+    int num_pairs;
     double t1, t2;
     double *stats;
 
-    origin = seginfo[my_node].addr;
-    target = seginfo[partner].addr;
+    num_pairs = num_active_nodes / 2;
+    origin_send = send_buffer;
+    target_recv = REMOTE_ADDRESS(recv_buffer, partner);
+    origin_recv = recv_buffer;
+    target_send = REMOTE_ADDRESS(send_buffer, partner);
 
-    stats = (double*)((char *)seginfo[my_node].addr + MAX_MSG_SIZE);
+    stats = stats_buffer;
 
     if (my_node == 0) {
-        printf("\n\nPut-Get Latency: (%d active pairs)\n", (num_nodes/2));
+        printf("\n\nPut-Get Latency: (%d active pairs)\n", num_pairs);
     }
 
     if (my_node < partner) {
         t1 = MPI_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
-            gasnet_put(partner, target, origin, sizeof(*target));
-            gasnet_get(origin, partner, target, sizeof(*target));
+            gasnet_put(partner, target_recv, origin_send,
+                       sizeof(*target_recv));
+            gasnet_get(origin_recv, partner, target_send,
+                       sizeof(*target_recv));
         }
         t2 = MPI_Wtime();
 
@@ -147,42 +216,41 @@ void run_putget_latency_test()
     gasnet_barrier_wait(0,0);
 
     if (my_node == 0) {
-        /* collect stats from other nodes */
-        for (i = 1; i < num_nodes/2; i++) {
+        /* collect stats from other active nodes */
+        for (i = 1; i < num_pairs; i++) {
             double latency_other;
-            double *stats_other =
-                (double *)((char *)seginfo[i].addr + MAX_MSG_SIZE);
+            double *stats_other = REMOTE_ADDRESS(stats, i);
             gasnet_get(&latency_other, i, stats_other, sizeof(latency_other));
             stats[0] += latency_other;
         }
-        printf("%20.8lf us\n",
-                stats[0]/(num_nodes/2));
+        printf("%20.8lf us\n", stats[0]/num_pairs);
     }
 }
 
 void run_putput_latency_test(sync_type_t sync)
 {
-    int *origin, *target;
+    int *origin_send, *target_recv;
     int i;
-    int num_active_nodes;
+    int num_pairs;
     double t1, t2;
     double *stats;
 
-    num_active_nodes = (num_nodes % 2) ? num_nodes - 1 : num_nodes;
-    origin = seginfo[my_node].addr;
-    target = seginfo[partner].addr;
+    num_pairs = num_active_nodes / 2;
+    origin_send = send_buffer;
+    target_recv = REMOTE_ADDRESS(recv_buffer, partner);
 
-    stats = (double*)((char *)seginfo[my_node].addr + MAX_MSG_SIZE);
+    stats = stats_buffer;
 
     if (my_node == 0) {
         printf("\n\nPut-Put Latency: (%d active pairs, %s)\n",
-                (num_nodes/2), (sync == BARRIER) ? "barrier" : "p2p");
+                num_pairs, (sync == BARRIER) ? "barrier" : "p2p");
     }
 
     if (my_node < partner) {
         t1 = MPI_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
-            gasnet_put(partner, target, origin, sizeof(*target));
+            gasnet_put(partner, target_recv, origin_send,
+                       sizeof(*target_recv));
             do_sync(sync);
             do_sync(sync);
         }
@@ -193,7 +261,8 @@ void run_putput_latency_test(sync_type_t sync)
         t1 = MPI_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
             do_sync(sync);
-            gasnet_put(partner, target, origin, sizeof(*target));
+            gasnet_put(partner, target_recv, origin_send,
+                       sizeof(*target_recv));
             do_sync(sync);
         }
         t2 = MPI_Wtime();
@@ -206,41 +275,41 @@ void run_putput_latency_test(sync_type_t sync)
 
     if (my_node == 0) {
         /* collect stats from other nodes */
-        for (i = 1; i < num_nodes; i++) {
+        for (i = 1; i < num_active_nodes; i++) {
             double latency_other;
-            double *stats_other =
-                (double *)((char *)seginfo[i].addr + MAX_MSG_SIZE);
+            double *stats_other = REMOTE_ADDRESS(stats, i);
             gasnet_get(&latency_other, i, stats_other, sizeof(latency_other));
             stats[0] += latency_other;
         }
         printf("%20.8lf us\n",
-                stats[0]/(num_nodes));
+                stats[0]/(num_active_nodes));
     }
 }
 
 void run_getget_latency_test(sync_type_t sync)
 {
-    int *origin, *target;
+    int *origin_recv, *target_send;
+    int num_pairs;
     int i;
-    int num_active_nodes;
     double t1, t2;
     double *stats;
 
-    num_active_nodes = (num_nodes % 2) ? num_nodes - 1 : num_nodes;
-    origin = seginfo[my_node].addr;
-    target = seginfo[partner].addr;
+    num_pairs = num_active_nodes / 2;
+    origin_recv = recv_buffer;
+    target_send = REMOTE_ADDRESS(send_buffer, partner);
 
-    stats = (double*)((char *)seginfo[my_node].addr + MAX_MSG_SIZE);
+    stats = stats_buffer;
 
     if (my_node == 0) {
         printf("\n\nGet-Get Latency: (%d active pairs, %s)\n",
-                (num_nodes/2), (sync == BARRIER) ? "barrier" : "p2p");
+                num_pairs, (sync == BARRIER) ? "barrier" : "p2p");
     }
 
     if (my_node < partner) {
         t1 = MPI_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
-            gasnet_get(origin, partner, target, sizeof(*target));
+            gasnet_get(origin_recv, partner, target_send,
+                       sizeof(*target_send));
             do_sync(sync);
             do_sync(sync);
         }
@@ -251,7 +320,8 @@ void run_getget_latency_test(sync_type_t sync)
         t1 = MPI_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
             do_sync(sync);
-            gasnet_get(origin, partner, target, sizeof(*target));
+            gasnet_get(origin_recv, partner, target_send,
+                       sizeof(*target_send));
             do_sync(sync);
         }
         t2 = MPI_Wtime();
@@ -264,34 +334,34 @@ void run_getget_latency_test(sync_type_t sync)
 
     if (my_node == 0) {
         /* collect stats from other nodes */
-        for (i = 1; i < num_nodes; i++) {
+        for (i = 1; i < num_active_nodes; i++) {
             double latency_other;
-            double *stats_other =
-                (double *)((char *)seginfo[i].addr + MAX_MSG_SIZE);
+            double *stats_other = REMOTE_ADDRESS(stats, i);
             gasnet_get(&latency_other, i, stats_other, sizeof(latency_other));
             stats[0] += latency_other;
         }
-        printf("%20.8lf us\n",
-                stats[0]/(num_nodes));
+        printf("%20.8lf us\n", stats[0]/num_active_nodes);
     }
 }
 
 void run_put_bw_test(int do_bulk)
 {
-    int *origin, *target;
+    int *origin_send, *target_recv;
     double t1, t2;
     int num_stats;
+    int num_pairs;
     size_t msg_size;
     double *stats;
 
-    origin = seginfo[my_node].addr;
-    target = seginfo[partner].addr;
+    num_pairs = num_active_nodes / 2;
+    origin_send = send_buffer;
+    target_recv = REMOTE_ADDRESS(recv_buffer, partner);
 
-    stats = (double *)((char *)seginfo[my_node].addr + MAX_MSG_SIZE);
+    stats = stats_buffer;
 
     if (my_node == 0) {
         printf("\n\n1-way %s Put Bandwidth: (%d pairs)\n",
-               do_bulk ? "(bulk)": "", (num_nodes/2));
+               do_bulk ? "(bulk)": "", num_pairs);
         printf("%20s %20s %20s\n", "msg_size", "count", "bandwidth");
     }
     num_stats = 0;
@@ -304,11 +374,12 @@ void run_put_bw_test(int do_bulk)
             t1 = MPI_Wtime();
             if (do_bulk) {
                 for (i = 0; i < count; i++) {
-                    gasnet_put_bulk(partner, target, origin, msg_size);
+                    gasnet_put_bulk(partner, target_recv, origin_send,
+                                    msg_size);
                 }
             } else {
                 for (i = 0; i < count; i++) {
-                    gasnet_put(partner, target, origin, msg_size);
+                    gasnet_put(partner, target_recv, origin_send, msg_size);
                 }
             }
             t2 = MPI_Wtime();
@@ -321,10 +392,9 @@ void run_put_bw_test(int do_bulk)
 
         if (my_node == 0) {
             /* collect stats from other nodes */
-            for (i = 1; i < num_nodes/2; i++) {
+            for (i = 1; i < num_pairs; i++) {
                 double bw_other;
-                double *stats_other =
-                    (double *)((char *)seginfo[i].addr + MAX_MSG_SIZE);
+                double *stats_other = REMOTE_ADDRESS(stats, i);
                 gasnet_get(&bw_other, i, &stats_other[num_stats],
                            sizeof(bw_other));
                 stats[num_stats] += bw_other;
@@ -332,7 +402,7 @@ void run_put_bw_test(int do_bulk)
 
             printf("%20ld %20ld %17.3f MB/s\n",
                     (long)msg_size, (long)count,
-                    stats[num_stats]/(num_nodes/2));
+                    stats[num_stats]/num_pairs);
         }
         num_stats++;
     }
@@ -340,20 +410,22 @@ void run_put_bw_test(int do_bulk)
 
 void run_get_bw_test(do_bulk)
 {
-    int *origin, *target;
+    int *origin_recv, *target_send;
     double t1, t2;
+    int num_pairs;
     int num_stats;
     size_t msg_size;
     double *stats;
 
-    origin = seginfo[my_node].addr;
-    target = seginfo[partner].addr;
+    num_pairs = num_active_nodes / 2;
+    origin_recv = recv_buffer;
+    target_send = REMOTE_ADDRESS(send_buffer, partner);
 
-    stats = (double *)((char *)seginfo[my_node].addr + MAX_MSG_SIZE);
+    stats = stats_buffer;
 
     if (my_node == 0) {
         printf("\n\n1-way %s Get Bandwidth (%d pairs):\n",
-               do_bulk ? "(bulk)":"", (num_nodes/2));
+               do_bulk ? "(bulk)":"", num_pairs);
         printf("%20s %20s %20s\n", "msg_size", "count", "bandwidth");
     }
     num_stats = 0;
@@ -366,11 +438,12 @@ void run_get_bw_test(do_bulk)
             t1 = MPI_Wtime();
             if (do_bulk) {
                 for (i = 0; i < count; i++) {
-                    gasnet_get_bulk(origin, partner, target, msg_size);
+                    gasnet_get_bulk(origin_recv, partner, target_send,
+                                    msg_size);
                 }
             } else {
                 for (i = 0; i < count; i++) {
-                    gasnet_get(origin, partner, target, msg_size);
+                    gasnet_get(origin_recv, partner, target_send, msg_size);
                 }
             }
             t2 = MPI_Wtime();
@@ -383,10 +456,9 @@ void run_get_bw_test(do_bulk)
 
         if (my_node == 0) {
             /* collect stats from other nodes */
-            for (i = 1; i < num_nodes/2; i++) {
+            for (i = 1; i < num_pairs; i++) {
                 double bw_other;
-                double *stats_other =
-                    (double *)((char *)seginfo[i].addr + MAX_MSG_SIZE);
+                double *stats_other = REMOTE_ADDRESS(stats, i);
                 gasnet_get(&bw_other, i, &stats_other[num_stats],
                            sizeof(bw_other));
                 stats[num_stats] += bw_other;
@@ -394,29 +466,31 @@ void run_get_bw_test(do_bulk)
 
             printf("%20ld %20ld %17.3f MB/s\n",
                     (long)msg_size, (long)count,
-                    stats[num_stats]/(num_nodes/2));
+                    stats[num_stats]/num_pairs);
         }
 
         num_stats++;
     }
 }
 
-void run_put_duplex_bw_test(int do_bulk)
+void run_put_bidir_bw_test(int do_bulk)
 {
-    int *origin, *target;
+    int *origin_send, *target_recv;
     double t1, t2;
+    int num_pairs;
     int num_stats;
     size_t msg_size;
     double *stats;
 
-    origin = seginfo[my_node].addr;
-    target = seginfo[partner].addr;
+    num_pairs = num_active_nodes / 2;
+    origin_send = send_buffer;
+    target_recv = REMOTE_ADDRESS(recv_buffer, partner);
 
-    stats = (double *)((char *)seginfo[my_node].addr + MAX_MSG_SIZE);
+    stats = stats_buffer;
 
     if (my_node == 0) {
         printf("\n\n2-way %s Put Bandwidth: (%d pairs)\n",
-               do_bulk ? "(bulk)": "", (num_nodes/2));
+               do_bulk ? "(bulk)": "", num_pairs);
         printf("%20s %20s %20s\n", "msg_size", "count", "bandwidth");
     }
     num_stats = 0;
@@ -428,11 +502,11 @@ void run_put_duplex_bw_test(int do_bulk)
         t1 = MPI_Wtime();
         if (do_bulk) {
             for (i = 0; i < count; i++) {
-                gasnet_put_bulk(partner, target, origin, msg_size);
+                gasnet_put_bulk(partner, target_recv, origin_send, msg_size);
             }
         } else {
             for (i = 0; i < count; i++) {
-                gasnet_put(partner, target, origin, msg_size);
+                gasnet_put(partner, target_recv, origin_send, msg_size);
             }
         }
         t2 = MPI_Wtime();
@@ -443,17 +517,10 @@ void run_put_duplex_bw_test(int do_bulk)
         gasnet_barrier_wait(0,0);
 
         if (my_node == 0) {
-            int num_active_nodes;
-            if (num_nodes % 2) {
-                num_active_nodes = num_nodes - 1;
-            } else {
-                num_active_nodes = num_nodes;
-            }
             /* collect stats from other nodes */
             for (i = 1; i < num_active_nodes; i++) {
                 double bw_other;
-                double *stats_other =
-                    (double *)((char *)seginfo[i].addr + MAX_MSG_SIZE);
+                double *stats_other = REMOTE_ADDRESS(stats, i);
                 gasnet_get(&bw_other, i, &stats_other[num_stats],
                            sizeof(bw_other));
                 stats[num_stats] += bw_other;
@@ -467,22 +534,24 @@ void run_put_duplex_bw_test(int do_bulk)
     }
 }
 
-void run_get_duplex_bw_test(int do_bulk)
+void run_get_bidir_bw_test(int do_bulk)
 {
-    int *origin, *target;
+    int *origin_recv, *target_send;
     double t1, t2;
+    int num_pairs;
     int num_stats;
     size_t msg_size;
     double *stats;
 
-    origin = seginfo[my_node].addr;
-    target = seginfo[partner].addr;
+    num_pairs = num_active_nodes / 2;
+    origin_recv = recv_buffer;
+    target_send = REMOTE_ADDRESS(send_buffer, partner);
 
-    stats = (double *)((char *)seginfo[my_node].addr + MAX_MSG_SIZE);
+    stats = stats_buffer;
 
     if (my_node == 0) {
         printf("\n\n2-way %s Get Bandwidth (%d pairs):\n",
-               do_bulk ? "(bulk)":"", (num_nodes/2));
+               do_bulk ? "(bulk)":"", num_pairs);
         printf("%20s %20s %20s\n", "msg_size", "count", "bandwidth");
     }
     num_stats = 0;
@@ -494,11 +563,11 @@ void run_get_duplex_bw_test(int do_bulk)
         t1 = MPI_Wtime();
         if (do_bulk) {
             for (i = 0; i < count; i++) {
-                gasnet_get_bulk(origin, partner, target, msg_size);
+                gasnet_get_bulk(origin_recv, partner, target_send, msg_size);
             }
         } else {
             for (i = 0; i < count; i++) {
-                gasnet_get(origin, partner, target, msg_size);
+                gasnet_get(origin_recv, partner, target_send, msg_size);
             }
         }
         t2 = MPI_Wtime();
@@ -509,18 +578,10 @@ void run_get_duplex_bw_test(int do_bulk)
         gasnet_barrier_wait(0,0);
 
         if (my_node == 0) {
-            int num_active_nodes;
-
-            if (num_nodes % 2) {
-                num_active_nodes = num_nodes - 1;
-            } else {
-                num_active_nodes = num_nodes;
-            }
             /* collect stats from other nodes */
             for (i = 1; i < num_active_nodes; i++) {
                 double bw_other;
-                double *stats_other =
-                    (double *)((char *)seginfo[i].addr + MAX_MSG_SIZE);
+                double *stats_other = REMOTE_ADDRESS(stats, i);
                 gasnet_get(&bw_other, i, &stats_other[num_stats],
                            sizeof(bw_other));
                 stats[num_stats] += bw_other;

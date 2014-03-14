@@ -17,10 +17,17 @@ Latency = (t2 - t1) / N
 Put-Put Latency Test:
 
 PUT small message to target address, synchronize with target, and then wait
-for partner to do the same to me.
+for partner to do the same to me. Do this N times.
 
 Latency = (t2 - t1) / N
 
+-----------------------------------------------
+Get-Get Latency Test:
+
+GET small message to target address, synchronize with target, and then wait
+for partner to do the same to me. Do this N times.
+
+Latency = (t2 - t1) / N
 
 ----------------------------------------------
 PUT Bandwidth Test:
@@ -53,3 +60,18 @@ Pair of processes GET M-sized message N times to eachother.
 Bandwidth = M*N / (t2 - t1)    (take average)
 
 -----------------------------------------------
+
+Strided PUT Bandwidth Test:
+
+PUT fixed-sized (size M) message to target with stride S, N times
+
+Bandwidth =  M*N / (t2 - t1)
+
+-----------------------------------------------
+
+Strided GET Bandwidth Test:
+
+GET fixed-sized (size M) message from target with stride S, N times
+
+Bandwidth =  M*N / (t2 - t1)
+
