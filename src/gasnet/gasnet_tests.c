@@ -35,10 +35,16 @@ void run_putget_latency_test();
 void run_getput_latency_test(sync_type_t sync);
 void run_putput_latency_test(sync_type_t sync);
 void run_getget_latency_test(sync_type_t sync);
+
 void run_put_bw_test(int do_bulk);
 void run_get_bw_test(int do_bulk);
+void run_strided_put_bw_test();
+void run_strided_get_bw_test();
+
 void run_put_bidir_bw_test(int do_bulk);
 void run_get_bidir_bw_test(int do_bulk);
+void run_strided_put_bidir_bw_test();
+void run_strided_get_bidir_bw_test();
 
 
 const size_t SEGMENT_SIZE = 30*1024*1024;
@@ -131,10 +137,16 @@ int main(int argc, char **argv)
     run_putput_latency_test(P2P);
     run_getget_latency_test(BARRIER);
     run_getget_latency_test(P2P);
+
     run_put_bw_test(0);
     run_get_bw_test(0);
+    run_strided_put_bw_test();
+    run_strided_get_bw_test();
+
     run_put_bidir_bw_test(0);
     run_get_bidir_bw_test(0);
+    run_strided_put_bidir_bw_test();
+    run_strided_get_bidir_bw_test();
 
     gasnet_exit(0);
 }
@@ -177,6 +189,54 @@ void p2psync_test()
 }
 #endif
 
+/********************************************************************
+ *                      SYNCHRONIZION ROUTINES
+ ********************************************************************/
+
+void do_sync(sync_type_t sync)
+{
+    if (sync == BARRIER) {
+        gasnet_barrier_notify(0,0);
+        gasnet_barrier_wait(0,0);
+    } else if (sync == P2P) {
+        /* notify partner */
+        do_sync_notify(partner);
+
+        /* wait on partner */
+        do_sync_wait(partner);
+    }
+}
+
+
+void handler_sync_notify(gasnet_token_t token, gasnet_handlerarg_t partner)
+{
+    int *partner_sync = &sync_notify_buffer[(int)partner];
+
+    /* increment counter */
+    __sync_fetch_and_add(partner_sync, 1);
+}
+
+
+void do_sync_notify(int partner)
+{
+    gasnet_AMRequestShort1(partner, GASNET_HANDLER_SYNC_NOTIFY_REQUEST,
+                           my_node);
+}
+
+void do_sync_wait(int partner)
+{
+    int *partner_sync = &sync_notify_buffer[partner];
+
+    /* wait on partner */
+    GASNET_BLOCKUNTIL(*partner_sync);
+
+    /* decrement counter */
+    __sync_fetch_and_add(partner_sync, -1);
+}
+
+/********************************************************************
+ *                      LATENCY TESTS
+ ********************************************************************/
 
 void run_putget_latency_test()
 {
@@ -344,13 +404,18 @@ void run_getget_latency_test(sync_type_t sync)
     }
 }
 
+/********************************************************************
+ *                      1-Way Bandwidth Tests
+ ********************************************************************/
+
 void run_put_bw_test(int do_bulk)
 {
     int *origin_send, *target_recv;
     double t1, t2;
     int num_stats;
     int num_pairs;
-    size_t msg_size;
+    const size_t MAX_BLKSIZE = MAX_MSG_SIZE / (sizeof *origin_send);
+    size_t blksize;
     double *stats;
 
     num_pairs = num_active_nodes / 2;
@@ -362,29 +427,28 @@ void run_put_bw_test(int do_bulk)
     if (my_node == 0) {
         printf("\n\n1-way %s Put Bandwidth: (%d pairs)\n",
                do_bulk ? "(bulk)": "", num_pairs);
-        printf("%20s %20s %20s\n", "msg_size", "count", "bandwidth");
+        printf("%20s %20s %20s\n", "blksize", "nrep", "bandwidth");
     }
     num_stats = 0;
-    for (msg_size = sizeof(int); msg_size <= MAX_MSG_SIZE;
-         msg_size *= 2) {
+    for (blksize = 1; blksize <= MAX_BLKSIZE; blksize *= 2) {
         int i;
-        int count = BW_NITER;
+        int nrep = BW_NITER;
 
         if (my_node < partner) {
+            size_t msg_size = blksize * (sizeof *origin_send);
             t1 = MPI_Wtime();
             if (do_bulk) {
-                for (i = 0; i < count; i++) {
-                    gasnet_put_bulk(partner, target_recv, origin_send,
-                                    msg_size);
+                for (i = 0; i < nrep; i++) {
+                    gasnet_put_bulk(partner, target_recv, origin_send, msg_size);
                 }
             } else {
-                for (i = 0; i < count; i++) {
+                for (i = 0; i < nrep; i++) {
                     gasnet_put(partner, target_recv, origin_send, msg_size);
                 }
             }
             t2 = MPI_Wtime();
 
-            stats[num_stats] = msg_size*count/(1024*1024*(t2-t1));
+            stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
         }
 
         gasnet_barrier_notify(0,0);
@@ -401,7 +465,7 @@ void run_put_bw_test(int do_bulk)
             }
 
             printf("%20ld %20ld %17.3f MB/s\n",
-                    (long)msg_size, (long)count,
+                    (long)blksize, (long)nrep,
                     stats[num_stats]/num_pairs);
         }
         num_stats++;
@@ -414,7 +478,8 @@ void run_get_bw_test(do_bulk)
     double t1, t2;
     int num_pairs;
     int num_stats;
-    size_t msg_size;
+    const size_t MAX_BLKSIZE = MAX_MSG_SIZE / (sizeof *target_send);
+    size_t blksize;
     double *stats;
 
     num_pairs = num_active_nodes / 2;
@@ -426,29 +491,29 @@ void run_get_bw_test(do_bulk)
     if (my_node == 0) {
         printf("\n\n1-way %s Get Bandwidth (%d pairs):\n",
                do_bulk ? "(bulk)":"", num_pairs);
-        printf("%20s %20s %20s\n", "msg_size", "count", "bandwidth");
+        printf("%20s %20s %20s\n", "blksize", "nrep", "bandwidth");
     }
     num_stats = 0;
-    for (msg_size = sizeof(int); msg_size <= MAX_MSG_SIZE;
-         msg_size *= 2) {
+    for (blksize = 1; blksize <= MAX_BLKSIZE; blksize *= 2) {
         int i;
-        int count = BW_NITER;
+        int nrep = BW_NITER;
 
         if (my_node < partner) {
+            size_t msg_size = blksize * (sizeof *target_send);
             t1 = MPI_Wtime();
             if (do_bulk) {
-                for (i = 0; i < count; i++) {
+                for (i = 0; i < nrep; i++) {
                     gasnet_get_bulk(origin_recv, partner, target_send,
                                     msg_size);
                 }
             } else {
-                for (i = 0; i < count; i++) {
+                for (i = 0; i < nrep; i++) {
                     gasnet_get(origin_recv, partner, target_send, msg_size);
                 }
             }
             t2 = MPI_Wtime();
 
-            stats[num_stats] = msg_size*count/(1024*1024*(t2-t1));
+            stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
         }
 
         gasnet_barrier_notify(0,0);
@@ -465,7 +530,7 @@ void run_get_bw_test(do_bulk)
             }
 
             printf("%20ld %20ld %17.3f MB/s\n",
-                    (long)msg_size, (long)count,
+                    (long)blksize, (long)nrep,
                     stats[num_stats]/num_pairs);
         }
 
@@ -473,13 +538,159 @@ void run_get_bw_test(do_bulk)
     }
 }
 
+void run_strided_put_bw_test()
+{
+    int *origin_send, *target_recv;
+    double t1, t2;
+    int num_stats;
+    int num_pairs;
+    const size_t MAX_COUNT = 32*1024;
+    const size_t MAX_BLKSIZE = MAX_MSG_SIZE / (sizeof *origin_send);
+    const size_t MAX_STRIDE = MAX_BLKSIZE / MAX_COUNT;
+    size_t stride;
+    double *stats;
+
+    num_pairs = num_active_nodes / 2;
+    origin_send = send_buffer;
+    target_recv = REMOTE_ADDRESS(recv_buffer, partner);
+
+    stats = stats_buffer;
+
+    if (my_node == 0) {
+        printf("\n\n1-way Strided Put Bandwidth: (%d pairs)\n",
+               num_pairs);
+        printf("%20s %20s %20s %20s\n", "count", "stride", "nrep", "bandwidth");
+    }
+    num_stats = 0;
+    for (stride = 1; stride <= MAX_STRIDE; stride *= 2) {
+        int i;
+        int nrep = BW_NITER;
+
+        if (my_node < partner) {
+            size_t origin_strides[1], target_strides[1];
+            size_t count[2];
+            size_t msg_size = MAX_COUNT * (sizeof *origin_send);
+
+            target_strides[0] = stride * (sizeof *origin_send);
+            origin_strides[0] = sizeof *origin_send;
+            count[0] = sizeof *origin_send;
+            count[1] = MAX_COUNT;
+
+            t1 = MPI_Wtime();
+            for (i = 0; i < nrep; i++) {
+                gasnet_puts_bulk(partner, target_recv, target_strides,
+                                 origin_send, origin_strides, count, 1);
+            }
+            t2 = MPI_Wtime();
+
+            stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
+        }
+
+        gasnet_barrier_notify(0,0);
+        gasnet_barrier_wait(0,0);
+
+        if (my_node == 0) {
+            /* collect stats from other nodes */
+            for (i = 1; i < num_pairs; i++) {
+                double bw_other;
+                double *stats_other = REMOTE_ADDRESS(stats, i);
+                gasnet_get(&bw_other, i, &stats_other[num_stats],
+                           sizeof(bw_other));
+                stats[num_stats] += bw_other;
+            }
+
+            printf("%20ld %20ld %20ld %17.3f MB/s\n",
+                    (long)MAX_COUNT, (long)stride,
+                    (long)nrep,
+                    stats[num_stats]/num_pairs);
+        }
+        num_stats++;
+    }
+}
+
+void run_strided_get_bw_test()
+{
+    int *origin_recv, *target_send;
+    double t1, t2;
+    int num_stats;
+    int num_pairs;
+    const size_t MAX_COUNT = 32*1024;
+    const size_t MAX_BLKSIZE = MAX_MSG_SIZE / (sizeof *target_send);
+    const size_t MAX_STRIDE = MAX_BLKSIZE / MAX_COUNT;
+    size_t stride;
+    double *stats;
+
+    num_pairs = num_active_nodes / 2;
+    origin_recv = recv_buffer;
+    target_send = REMOTE_ADDRESS(send_buffer, partner);
+
+    stats = stats_buffer;
+
+    if (my_node == 0) {
+        printf("\n\n1-way Strided Get Bandwidth: (%d pairs)\n",
+               num_pairs);
+        printf("%20s %20s %20s %20s\n", "count", "stride", "nrep", "bandwidth");
+    }
+    num_stats = 0;
+    for (stride = 1; stride <= MAX_STRIDE; stride *= 2) {
+        int i;
+        int nrep = BW_NITER;
+
+        if (my_node < partner) {
+            size_t origin_strides[1], target_strides[1];
+            size_t count[2];
+            size_t msg_size = MAX_COUNT * (sizeof *target_send);
+
+            origin_strides[0] = stride * (sizeof *target_send);
+            target_strides[0] = sizeof *target_send;
+            count[0] = sizeof *target_send;
+            count[1] = MAX_COUNT;
+
+            t1 = MPI_Wtime();
+            for (i = 0; i < nrep; i++) {
+                gasnet_gets_bulk(origin_recv, origin_strides,
+                        partner, target_send, target_strides,
+                        count, 1);
+            }
+            t2 = MPI_Wtime();
+
+            stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
+        }
+
+        gasnet_barrier_notify(0,0);
+        gasnet_barrier_wait(0,0);
+
+        if (my_node == 0) {
+            /* collect stats from other nodes */
+            for (i = 1; i < num_pairs; i++) {
+                double bw_other;
+                double *stats_other = REMOTE_ADDRESS(stats, i);
+                gasnet_get(&bw_other, i, &stats_other[num_stats],
+                           sizeof(bw_other));
+                stats[num_stats] += bw_other;
+            }
+
+            printf("%20ld %20ld %20ld %17.3f MB/s\n",
+                    (long)MAX_COUNT, (long)stride,
+                    (long)nrep,
+                    stats[num_stats]/num_pairs);
+        }
+        num_stats++;
+    }
+}
+
+/********************************************************************
+ *                      2-Way Bandwidth Tests
+ ********************************************************************/
+
 void run_put_bidir_bw_test(int do_bulk)
 {
     int *origin_send, *target_recv;
     double t1, t2;
     int num_pairs;
     int num_stats;
-    size_t msg_size;
+    const size_t MAX_BLKSIZE = MAX_MSG_SIZE / (sizeof *origin_send);
+    size_t blksize;
     double *stats;
 
     num_pairs = num_active_nodes / 2;
@@ -491,27 +702,27 @@ void run_put_bidir_bw_test(int do_bulk)
     if (my_node == 0) {
         printf("\n\n2-way %s Put Bandwidth: (%d pairs)\n",
                do_bulk ? "(bulk)": "", num_pairs);
-        printf("%20s %20s %20s\n", "msg_size", "count", "bandwidth");
+        printf("%20s %20s %20s\n", "blksize", "nrep", "bandwidth");
     }
     num_stats = 0;
-    for (msg_size = sizeof(int); msg_size <= MAX_MSG_SIZE;
-         msg_size *= 2) {
+    for (blksize = 1; blksize <= MAX_BLKSIZE; blksize *= 2) {
         int i;
-        int count = BW_NITER;
+        int nrep = BW_NITER;
+        size_t msg_size = blksize * (sizeof *origin_send);
 
         t1 = MPI_Wtime();
         if (do_bulk) {
-            for (i = 0; i < count; i++) {
+            for (i = 0; i < nrep; i++) {
                 gasnet_put_bulk(partner, target_recv, origin_send, msg_size);
             }
         } else {
-            for (i = 0; i < count; i++) {
+            for (i = 0; i < nrep; i++) {
                 gasnet_put(partner, target_recv, origin_send, msg_size);
             }
         }
         t2 = MPI_Wtime();
 
-        stats[num_stats] = msg_size*count/(1024*1024*(t2-t1));
+        stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
 
         gasnet_barrier_notify(0,0);
         gasnet_barrier_wait(0,0);
@@ -527,7 +738,7 @@ void run_put_bidir_bw_test(int do_bulk)
             }
 
             printf("%20ld %20ld %17.3f MB/s\n",
-                    (long)msg_size, (long)count,
+                    (long)blksize, (long)nrep,
                     stats[num_stats]/num_active_nodes);
         }
         num_stats++;
@@ -540,7 +751,8 @@ void run_get_bidir_bw_test(int do_bulk)
     double t1, t2;
     int num_pairs;
     int num_stats;
-    size_t msg_size;
+    const size_t MAX_BLKSIZE = MAX_MSG_SIZE / (sizeof *target_send);
+    size_t blksize;
     double *stats;
 
     num_pairs = num_active_nodes / 2;
@@ -552,27 +764,27 @@ void run_get_bidir_bw_test(int do_bulk)
     if (my_node == 0) {
         printf("\n\n2-way %s Get Bandwidth (%d pairs):\n",
                do_bulk ? "(bulk)":"", num_pairs);
-        printf("%20s %20s %20s\n", "msg_size", "count", "bandwidth");
+        printf("%20s %20s %20s\n", "blksize", "nrep", "bandwidth");
     }
     num_stats = 0;
-    for (msg_size = sizeof(int); msg_size <= MAX_MSG_SIZE;
-         msg_size *= 2) {
+    for (blksize = 1; blksize <= MAX_BLKSIZE; blksize *= 2) {
         int i;
-        int count = BW_NITER;
+        int nrep = BW_NITER;
+        size_t msg_size = blksize * (sizeof *target_send);
 
         t1 = MPI_Wtime();
         if (do_bulk) {
-            for (i = 0; i < count; i++) {
+            for (i = 0; i < nrep; i++) {
                 gasnet_get_bulk(origin_recv, partner, target_send, msg_size);
             }
         } else {
-            for (i = 0; i < count; i++) {
+            for (i = 0; i < nrep; i++) {
                 gasnet_get(origin_recv, partner, target_send, msg_size);
             }
         }
         t2 = MPI_Wtime();
 
-        stats[num_stats] = msg_size*count/(1024*1024*(t2-t1));
+        stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
 
         gasnet_barrier_notify(0,0);
         gasnet_barrier_wait(0,0);
@@ -588,7 +800,7 @@ void run_get_bidir_bw_test(int do_bulk)
             }
 
             printf("%20ld %20ld %17.3f MB/s\n",
-                    (long)msg_size, (long)count,
+                    (long)blksize, (long)nrep,
                     stats[num_stats]/num_active_nodes);
         }
 
@@ -596,43 +808,137 @@ void run_get_bidir_bw_test(int do_bulk)
     }
 }
 
-void do_sync(sync_type_t sync)
+void run_strided_put_bidir_bw_test()
 {
-    if (sync == BARRIER) {
+    int *origin_send, *target_recv;
+    double t1, t2;
+    int num_stats;
+    int num_pairs;
+    const size_t MAX_COUNT = 32*1024;
+    const size_t MAX_BLKSIZE = MAX_MSG_SIZE / (sizeof *origin_send);
+    const size_t MAX_STRIDE = MAX_BLKSIZE / MAX_COUNT;
+    size_t stride;
+    double *stats;
+
+    num_pairs = num_active_nodes / 2;
+    origin_send = send_buffer;
+    target_recv = REMOTE_ADDRESS(recv_buffer, partner);
+
+    stats = stats_buffer;
+
+    if (my_node == 0) {
+        printf("\n\n2-way Strided Put Bandwidth: (%d pairs)\n",
+               num_pairs);
+        printf("%20s %20s %20s %20s\n", "count", "stride", "nrep", "bandwidth");
+    }
+    num_stats = 0;
+    for (stride = 1; stride <= MAX_STRIDE; stride *= 2) {
+        int i;
+        size_t origin_strides[1], target_strides[1];
+        size_t count[2];
+        int nrep = BW_NITER;
+        size_t msg_size = MAX_COUNT * (sizeof *origin_send);
+
+        target_strides[0] = stride * (sizeof *origin_send);
+        origin_strides[0] = sizeof *origin_send;
+        count[0] = sizeof *origin_send;
+        count[1] = MAX_COUNT;
+
+        t1 = MPI_Wtime();
+        for (i = 0; i < nrep; i++) {
+            gasnet_puts_bulk(partner, target_recv, target_strides,
+                             origin_send, origin_strides, count, 1);
+        }
+        t2 = MPI_Wtime();
+
+        stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
+
         gasnet_barrier_notify(0,0);
         gasnet_barrier_wait(0,0);
-    } else if (sync == P2P) {
-        /* notify partner */
-        do_sync_notify(partner);
 
-        /* wait on partner */
-        do_sync_wait(partner);
+        if (my_node == 0) {
+            /* collect stats from other nodes */
+            for (i = 1; i < num_active_nodes; i++) {
+                double bw_other;
+                double *stats_other = REMOTE_ADDRESS(stats, i);
+                gasnet_get(&bw_other, i, &stats_other[num_stats],
+                           sizeof(bw_other));
+                stats[num_stats] += bw_other;
+            }
+
+            printf("%20ld %20ld %20ld %17.3f MB/s\n",
+                    (long)MAX_COUNT, (long)stride,
+                    (long)nrep,
+                    stats[num_stats]/num_active_nodes);
+        }
+        num_stats++;
     }
 }
 
-
-void handler_sync_notify(gasnet_token_t token, gasnet_handlerarg_t partner)
+void run_strided_get_bidir_bw_test()
 {
-    int *partner_sync = &sync_notify_buffer[(int)partner];
+    int *origin_recv, *target_send;
+    double t1, t2;
+    int num_stats;
+    int num_pairs;
+    const size_t MAX_COUNT = 32*1024;
+    const size_t MAX_BLKSIZE = MAX_MSG_SIZE / (sizeof *target_send);
+    const size_t MAX_STRIDE = MAX_BLKSIZE / MAX_COUNT;
+    size_t stride;
+    double *stats;
 
-    /* increment counter */
-    __sync_fetch_and_add(partner_sync, 1);
-}
+    num_pairs = num_active_nodes / 2;
+    origin_recv = recv_buffer;
+    target_send = REMOTE_ADDRESS(send_buffer, partner);
 
+    stats = stats_buffer;
 
-void do_sync_notify(int partner)
-{
-    gasnet_AMRequestShort1(partner, GASNET_HANDLER_SYNC_NOTIFY_REQUEST,
-                           my_node);
-}
+    if (my_node == 0) {
+        printf("\n\n2-way Strided Get Bandwidth: (%d pairs)\n",
+               num_pairs);
+        printf("%20s %20s %20s %20s\n", "count", "stride", "nrep", "bandwidth");
+    }
+    num_stats = 0;
+    for (stride = 1; stride <= MAX_STRIDE; stride *= 2) {
+        int i;
+        size_t origin_strides[1], target_strides[1];
+        size_t count[2];
+        int nrep = BW_NITER;
+        size_t msg_size = MAX_COUNT * (sizeof *target_send);
 
-void do_sync_wait(int partner)
-{
-    int *partner_sync = &sync_notify_buffer[partner];
+        origin_strides[0] = stride * (sizeof *target_send);
+        target_strides[0] = sizeof *target_send;
+        count[0] = sizeof *target_send;
+        count[1] = MAX_COUNT;
 
-    /* wait on partner */
-    GASNET_BLOCKUNTIL(*partner_sync);
+        t1 = MPI_Wtime();
+        for (i = 0; i < nrep; i++) {
+            gasnet_gets_bulk(origin_recv, origin_strides,
+                    partner, target_send, target_strides,
+                    count, 1);
+        }
+        t2 = MPI_Wtime();
 
-    /* decrement counter */
-    __sync_fetch_and_add(partner_sync, -1);
+        stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
+
+        gasnet_barrier_notify(0,0);
+        gasnet_barrier_wait(0,0);
+
+        if (my_node == 0) {
+            /* collect stats from other nodes */
+            for (i = 1; i < num_active_nodes; i++) {
+                double bw_other;
+                double *stats_other = REMOTE_ADDRESS(stats, i);
+                gasnet_get(&bw_other, i, &stats_other[num_stats],
+                           sizeof(bw_other));
+                stats[num_stats] += bw_other;
+            }
+
+            printf("%20ld %20ld %20ld %17.3f MB/s\n",
+                    (long)MAX_COUNT, (long)stride,
+                    (long)nrep,
+                    stats[num_stats]/num_active_nodes);
+        }
+        num_stats++;
+    }
 }
