@@ -6,6 +6,22 @@ languages.
 
 TESTS:
 
+-----------------------------------------------
+Put-Get Latency Test:
+
+PUT small message to target address and then GET from target address N times.
+
+Latency = (t2 - t1) / N
+
+-----------------------------------------------
+Put-Put Latency Test:
+
+PUT small message to target address, synchronize with target, and then wait
+for partner to do the same to me.
+
+Latency = (t2 - t1) / N
+
+
 ----------------------------------------------
 PUT Bandwidth Test:
 
@@ -19,13 +35,6 @@ GET Bandwidth Test
 GET M-sized message N times.
 
 Bandwidth = M*N / (t2 - t1)
-
------------------------------------------------
-Latency Test:
-
-PUT small message to target address and then GET from target address N times.
-
-Latency = (t2 - t1) / N
 
 -----------------------------------------------
 
@@ -42,3 +51,5 @@ GET Duplex Bandwidth Test:
 Pair of processes GET M-sized message N times to eachother.
 
 Bandwidth = M*N / (t2 - t1)    (take average)
+
+-----------------------------------------------
