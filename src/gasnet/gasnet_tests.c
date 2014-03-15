@@ -1,7 +1,7 @@
 /*
  * Microbenchmarks for GASNet
  *
- * (C) HPCTools Groups University of Houston
+ * (C) HPCTools Group, University of Houston
  *
  */
 
@@ -51,6 +51,8 @@ const size_t SEGMENT_SIZE = 30*1024*1024;
 const size_t MAX_MSG_SIZE = 4*1024*1024;
 const long long LAT_NITER = 1000000;
 const long long BW_NITER = 10000;
+
+const int NUM_STATS = 32;
 
 int my_node;
 int num_nodes;
@@ -129,7 +131,7 @@ int main(int argc, char **argv)
         &recv_buffer[MAX_MSG_SIZE/(sizeof send_buffer[0]) + 1];
 
     /* initialize address of sync notify buffer */
-    sync_notify_buffer = (int *) &stats_buffer[num_nodes + 1];
+    sync_notify_buffer = (int *) &stats_buffer[NUM_STATS + 1];
 
     /* run tests */
     run_putget_latency_test();
@@ -147,6 +149,7 @@ int main(int argc, char **argv)
     run_get_bidir_bw_test(0);
     run_strided_put_bidir_bw_test();
     run_strided_get_bidir_bw_test();
+
 
     gasnet_exit(0);
 }

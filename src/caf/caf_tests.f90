@@ -18,6 +18,8 @@ module caf_microbenchmarks
 
     integer, parameter :: ELEM_SIZE = 4
 
+    integer, parameter :: NUM_STATS = 32
+
     integer, allocatable :: send_buffer(:)[:]
     integer, allocatable :: recv_buffer(:)[:]
     double precision, allocatable :: stats_buffer(:)[:]
@@ -60,7 +62,7 @@ module caf_microbenchmarks
         num_pairs = num_active_images / 2
 
         if (ti == 1) then
-            write (*,'("Put-Get Latency: (",I3," active pairs)")') &
+            write (*,'(//,"Put-Get Latency: (",I0," active pairs)")') &
                  num_pairs
         end if
 
@@ -105,10 +107,10 @@ module caf_microbenchmarks
 
         if (ti == 1) then
             if (sync == BARRIER) then
-                write (*,'("Put-Put Latency: (",I3," active pairs, ",A7,")")') &
+                write (*,'(//,"Put-Put Latency: (",I0," active pairs, ",A0,")")') &
                     num_pairs, "barrier"
             else
-                write (*,'("Put-Put Latency: (",I3," active pairs, ",A3,")")') &
+                write (*,'(//, "Put-Put Latency: (",I0," active pairs, ",A0,")")') &
                     num_pairs, "p2p"
             end if
         end if
@@ -165,10 +167,10 @@ module caf_microbenchmarks
 
         if (ti == 1) then
             if (sync == BARRIER) then
-                write (*,'("Get-Get Latency: (",I3," active pairs, ",A7,")")') &
+                write (*,'(//,"Get-Get Latency: (",I0," active pairs, ",A0,")")') &
                     num_pairs, "barrier"
             else
-                write (*,'("Get-Get Latency: (",I3," active pairs, ",A3,")")') &
+                write (*,'(//,"Get-Get Latency: (",I0," active pairs, ",A0,")")') &
                     num_pairs, "p2p"
             end if
         end if
@@ -226,7 +228,7 @@ module caf_microbenchmarks
         num_pairs = num_active_images / 2
 
         if (ti == 1) then
-            write (*,'("1-Way Put Bandwith: (",I3," active pairs)")') &
+            write (*,'(//,"1-Way Put Bandwith: (",I0," active pairs)")') &
                 num_pairs
             write (*,'(A20, A20, A20)') "blksize", "nrep", "bandwidth"
         end if
@@ -251,7 +253,8 @@ module caf_microbenchmarks
 
           if (ti == 1) then
               do i = 2, num_pairs
-                  stats_buffer(num_stats) = stats_buffer(num_stats) + stats_buffer(num_stats)[i]
+                  stats_buffer(num_stats) = stats_buffer(num_stats) + &
+                                            stats_buffer(num_stats)[i]
               end do
               write (*, '(I20,I20,F17.3, " MB/S")') &
                      blksize, nrep, stats_buffer(num_stats)/num_pairs
@@ -264,6 +267,54 @@ module caf_microbenchmarks
     end subroutine run_put_bw_test
 
     subroutine run_get_bw_test()
+        implicit none
+        double precision :: t1, t2
+        integer :: ti, ni, nrep
+        integer :: num_stats
+        integer :: num_pairs
+        integer :: blksize
+        integer :: i
+
+        ti = this_image()
+        ni = num_images()
+        num_pairs = num_active_images / 2
+
+        if (ti == 1) then
+            write (*,'(//,"1-Way Get Bandwith: (",I0," active pairs)")') &
+                num_pairs
+            write (*,'(A20, A20, A20)') "blksize", "nrep", "bandwidth"
+        end if
+
+        num_stats = 1
+        blksize = 1
+        do while (blksize <= BUFFER_SIZE)
+          nrep = BW_NITER
+
+          if (ti < partner) then
+              t1 = MPI_WTIME()
+              do i = 1, nrep
+                recv_buffer(1:blksize) = send_buffer(1:blksize)[partner]
+              end do
+              t2 = MPI_WTIME()
+
+              stats_buffer(num_stats) = &
+                  dble(blksize)*ELEM_SIZE*nrep/(1024*1024*(t2-t1))
+          end if
+
+          sync all
+
+          if (ti == 1) then
+              do i = 2, num_pairs
+                  stats_buffer(num_stats) = stats_buffer(num_stats) + &
+                                            stats_buffer(num_stats)[i]
+              end do
+              write (*, '(I20,I20,F17.3, " MB/S")') &
+                     blksize, nrep, stats_buffer(num_stats)/num_pairs
+          end if
+
+          num_stats = num_stats + 1
+          blksize = blksize * 2
+        end do
     end subroutine run_get_bw_test
 
     subroutine run_strided_put_bw_test()
@@ -276,6 +327,109 @@ module caf_microbenchmarks
     !                   2-WAY BANDWIDTH TESTS
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+    subroutine run_put_bw_bidir_test()
+        implicit none
+        double precision :: t1, t2
+        integer :: ti, ni, nrep
+        integer :: num_stats
+        integer :: num_pairs
+        integer :: blksize
+        integer :: i
+
+        ti = this_image()
+        ni = num_images()
+        num_pairs = num_active_images / 2
+
+        if (ti == 1) then
+            write (*,'(//,"2-Way Put Bandwith: (",I0," active pairs)")') &
+                num_pairs
+            write (*,'(A20, A20, A20)') "blksize", "nrep", "bandwidth"
+        end if
+
+        num_stats = 1
+        blksize = 1
+        do while (blksize <= BUFFER_SIZE)
+          nrep = BW_NITER
+
+          t1 = MPI_WTIME()
+          do i = 1, nrep
+            recv_buffer(1:blksize)[partner] = send_buffer(1:blksize)
+          end do
+          t2 = MPI_WTIME()
+
+          stats_buffer(num_stats) = &
+              dble(blksize)*ELEM_SIZE*nrep/(1024*1024*(t2-t1))
+
+          sync all
+
+          if (ti == 1) then
+              do i = 2, num_active_images
+                  stats_buffer(num_stats) = stats_buffer(num_stats) + &
+                                            stats_buffer(num_stats)[i]
+              end do
+              write (*, '(I20,I20,F17.3, " MB/S")') &
+                     blksize, nrep, stats_buffer(num_stats)/num_active_images
+          end if
+
+          num_stats = num_stats + 1
+          blksize = blksize * 2
+        end do
+    end subroutine run_put_bw_bidir_test
+
+    subroutine run_get_bw_bidir_test()
+        implicit none
+        double precision :: t1, t2
+        integer :: ti, ni, nrep
+        integer :: num_stats
+        integer :: num_pairs
+        integer :: blksize
+        integer :: i
+
+        ti = this_image()
+        ni = num_images()
+        num_pairs = num_active_images / 2
+
+        if (ti == 1) then
+            write (*,'(//,"2-Way Get Bandwith: (",I0," active pairs)")') &
+                num_pairs
+            write (*,'(A20, A20, A20)') "blksize", "nrep", "bandwidth"
+        end if
+
+        num_stats = 1
+        blksize = 1
+        do while (blksize <= BUFFER_SIZE)
+          nrep = BW_NITER
+
+          t1 = MPI_WTIME()
+          do i = 1, nrep
+            recv_buffer(1:blksize) = send_buffer(1:blksize)[partner]
+          end do
+          t2 = MPI_WTIME()
+
+          stats_buffer(num_stats) = &
+              dble(blksize)*ELEM_SIZE*nrep/(1024*1024*(t2-t1))
+
+          sync all
+
+          if (ti == 1) then
+              do i = 2, num_active_images
+                  stats_buffer(num_stats) = stats_buffer(num_stats) + &
+                                            stats_buffer(num_stats)[i]
+              end do
+              write (*, '(I20,I20,F17.3, " MB/S")') &
+                     blksize, nrep, stats_buffer(num_stats)/num_active_images
+          end if
+
+          num_stats = num_stats + 1
+          blksize = blksize * 2
+        end do
+    end subroutine run_get_bw_bidir_test
+
+    subroutine run_strided_put_bidir_bw_test()
+    end subroutine run_strided_put_bidir_bw_test
+
+    subroutine run_strided_get_bidir_bw_test()
+    end subroutine run_strided_get_bidir_bw_test
 end module caf_microbenchmarks
 
 program main
@@ -297,14 +451,17 @@ program main
 
     allocate ( send_buffer(BUFFER_SIZE)[*] )
     allocate ( recv_buffer(BUFFER_SIZE)[*] )
-    allocate ( stats_buffer(num_images())[*] )
+    allocate ( stats_buffer(NUM_STATS)[*] )
 
-!     call run_putget_latency_test()
-!     call run_putput_latency_test(BARRIER)
-!     call run_putput_latency_test(P2P)
-!     call run_getget_latency_test(BARRIER)
-!     call run_getget_latency_test(P2P)
+    call run_putget_latency_test()
+    call run_putput_latency_test(BARRIER)
+    call run_putput_latency_test(P2P)
+    call run_getget_latency_test(BARRIER)
+    call run_getget_latency_test(P2P)
 
     call run_put_bw_test()
+    call run_get_bw_test()
+    call run_put_bw_bidir_test()
+    call run_get_bw_bidir_test()
 
 end program
