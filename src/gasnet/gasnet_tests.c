@@ -23,6 +23,12 @@ typedef enum {
   P2P
 } sync_type_t;
 
+typedef enum {
+  TARGET_STRIDED,
+  ORIGIN_STRIDED,
+  BOTH_STRIDED
+} strided_type_t;
+
 void print_sendrecv_address();
 void p2psync_test();
 
@@ -38,13 +44,13 @@ void run_getget_latency_test(sync_type_t sync);
 
 void run_put_bw_test(int do_bulk);
 void run_get_bw_test(int do_bulk);
-void run_strided_put_bw_test();
-void run_strided_get_bw_test();
+void run_strided_put_bw_test(strided_type_t strided);
+void run_strided_get_bw_test(strided_type_t strided);
 
 void run_put_bidir_bw_test(int do_bulk);
 void run_get_bidir_bw_test(int do_bulk);
-void run_strided_put_bidir_bw_test();
-void run_strided_get_bidir_bw_test();
+void run_strided_put_bidir_bw_test(strided_type_t strided);
+void run_strided_get_bidir_bw_test(strided_type_t strided);
 
 
 const size_t SEGMENT_SIZE = 30*1024*1024;
@@ -134,6 +140,7 @@ int main(int argc, char **argv)
     sync_notify_buffer = (int *) &stats_buffer[NUM_STATS + 1];
 
     /* run tests */
+
     run_putget_latency_test();
     run_putput_latency_test(BARRIER);
     run_putput_latency_test(P2P);
@@ -150,6 +157,19 @@ int main(int argc, char **argv)
     run_strided_put_bidir_bw_test();
     run_strided_get_bidir_bw_test();
 
+    run_strided_put_bw_test(TARGET_STRIDED);
+    run_strided_put_bw_test(ORIGIN_STRIDED);
+    run_strided_put_bw_test(BOTH_STRIDED);
+    run_strided_get_bw_test(TARGET_STRIDED);
+    run_strided_get_bw_test(ORIGIN_STRIDED);
+    run_strided_get_bw_test(BOTH_STRIDED);
+
+    run_strided_put_bidir_bw_test(TARGET_STRIDED);
+    run_strided_put_bidir_bw_test(ORIGIN_STRIDED);
+    run_strided_put_bidir_bw_test(BOTH_STRIDED);
+    run_strided_get_bidir_bw_test(TARGET_STRIDED);
+    run_strided_get_bidir_bw_test(ORIGIN_STRIDED);
+    run_strided_get_bidir_bw_test(BOTH_STRIDED);
 
     gasnet_exit(0);
 }
@@ -541,7 +561,7 @@ void run_get_bw_test(do_bulk)
     }
 }
 
-void run_strided_put_bw_test()
+void run_strided_put_bw_test(strided_type_t strided)
 {
     int *origin_send, *target_recv;
     double t1, t2;
@@ -560,7 +580,10 @@ void run_strided_put_bw_test()
     stats = stats_buffer;
 
     if (my_node == 0) {
-        printf("\n\n1-way Strided Put Bandwidth: (%d pairs)\n",
+        printf("\n\n1-way %s Put Bandwidth: (%d pairs)\n",
+               (strided == TARGET_STRIDED) ? "Target Strided" :
+               (strided == ORIGIN_STRIDED) ? "Origin Strided" :
+               "Both Strided",
                num_pairs);
         printf("%20s %20s %20s %20s\n", "count", "stride", "nrep", "bandwidth");
     }
@@ -574,8 +597,20 @@ void run_strided_put_bw_test()
             size_t count[2];
             size_t msg_size = MAX_COUNT * (sizeof *origin_send);
 
-            target_strides[0] = stride * (sizeof *origin_send);
+            target_strides[0] = sizeof *origin_send;
             origin_strides[0] = sizeof *origin_send;
+
+            if (strided == TARGET_STRIDED)
+                target_strides[0] = stride * (sizeof *origin_send);
+
+            if (strided == ORIGIN_STRIDED)
+                origin_strides[0] = stride * (sizeof *origin_send);
+
+            if (strided == BOTH_STRIDED) {
+                target_strides[0] = stride * (sizeof *origin_send);
+                origin_strides[0] = stride * (sizeof *origin_send);
+            }
+
             count[0] = sizeof *origin_send;
             count[1] = MAX_COUNT;
 
@@ -611,7 +646,7 @@ void run_strided_put_bw_test()
     }
 }
 
-void run_strided_get_bw_test()
+void run_strided_get_bw_test(strided_type_t strided)
 {
     int *origin_recv, *target_send;
     double t1, t2;
@@ -630,7 +665,10 @@ void run_strided_get_bw_test()
     stats = stats_buffer;
 
     if (my_node == 0) {
-        printf("\n\n1-way Strided Get Bandwidth: (%d pairs)\n",
+        printf("\n\n1-way %s Get Bandwidth: (%d pairs)\n",
+               (strided == TARGET_STRIDED) ? "Target Strided" :
+               (strided == ORIGIN_STRIDED) ? "Origin Strided" :
+               "Both Strided",
                num_pairs);
         printf("%20s %20s %20s %20s\n", "count", "stride", "nrep", "bandwidth");
     }
@@ -644,8 +682,20 @@ void run_strided_get_bw_test()
             size_t count[2];
             size_t msg_size = MAX_COUNT * (sizeof *target_send);
 
-            origin_strides[0] = stride * (sizeof *target_send);
+            origin_strides[0] = sizeof *target_send;
             target_strides[0] = sizeof *target_send;
+
+            if (strided == TARGET_STRIDED)
+                target_strides[0] = stride * (sizeof *target_send);
+
+            if (strided == ORIGIN_STRIDED)
+                origin_strides[0] = stride * (sizeof *target_send);
+
+            if (strided == BOTH_STRIDED) {
+                target_strides[0] = stride * (sizeof *target_send);
+                origin_strides[0] = stride * (sizeof *target_send);
+            }
+
             count[0] = sizeof *target_send;
             count[1] = MAX_COUNT;
 
@@ -811,7 +861,7 @@ void run_get_bidir_bw_test(int do_bulk)
     }
 }
 
-void run_strided_put_bidir_bw_test()
+void run_strided_put_bidir_bw_test(strided_type_t strided)
 {
     int *origin_send, *target_recv;
     double t1, t2;
@@ -830,7 +880,10 @@ void run_strided_put_bidir_bw_test()
     stats = stats_buffer;
 
     if (my_node == 0) {
-        printf("\n\n2-way Strided Put Bandwidth: (%d pairs)\n",
+        printf("\n\n2-way %s Put Bandwidth: (%d pairs)\n",
+               (strided == TARGET_STRIDED) ? "Target Strided" :
+               (strided == ORIGIN_STRIDED) ? "Origin Strided" :
+               "Both Strided",
                num_pairs);
         printf("%20s %20s %20s %20s\n", "count", "stride", "nrep", "bandwidth");
     }
@@ -842,8 +895,20 @@ void run_strided_put_bidir_bw_test()
         int nrep = BW_NITER;
         size_t msg_size = MAX_COUNT * (sizeof *origin_send);
 
-        target_strides[0] = stride * (sizeof *origin_send);
+        target_strides[0] = sizeof *origin_send;
         origin_strides[0] = sizeof *origin_send;
+
+        if (strided == TARGET_STRIDED)
+            target_strides[0] = stride * (sizeof *origin_send);
+
+        if (strided == ORIGIN_STRIDED)
+            origin_strides[0] = stride * (sizeof *origin_send);
+
+        if (strided == BOTH_STRIDED) {
+            target_strides[0] = stride * (sizeof *origin_send);
+            origin_strides[0] = stride * (sizeof *origin_send);
+        }
+
         count[0] = sizeof *origin_send;
         count[1] = MAX_COUNT;
 
@@ -878,7 +943,7 @@ void run_strided_put_bidir_bw_test()
     }
 }
 
-void run_strided_get_bidir_bw_test()
+void run_strided_get_bidir_bw_test(strided_type_t strided)
 {
     int *origin_recv, *target_send;
     double t1, t2;
@@ -897,7 +962,10 @@ void run_strided_get_bidir_bw_test()
     stats = stats_buffer;
 
     if (my_node == 0) {
-        printf("\n\n2-way Strided Get Bandwidth: (%d pairs)\n",
+        printf("\n\n2-way %s Get Bandwidth: (%d pairs)\n",
+               (strided == TARGET_STRIDED) ? "Target Strided" :
+               (strided == ORIGIN_STRIDED) ? "Origin Strided" :
+               "Both Strided",
                num_pairs);
         printf("%20s %20s %20s %20s\n", "count", "stride", "nrep", "bandwidth");
     }
@@ -909,8 +977,20 @@ void run_strided_get_bidir_bw_test()
         int nrep = BW_NITER;
         size_t msg_size = MAX_COUNT * (sizeof *target_send);
 
-        origin_strides[0] = stride * (sizeof *target_send);
+        origin_strides[0] = sizeof *target_send;
         target_strides[0] = sizeof *target_send;
+
+        if (strided == TARGET_STRIDED)
+            target_strides[0] = stride * (sizeof *target_send);
+
+        if (strided == ORIGIN_STRIDED)
+            origin_strides[0] = stride * (sizeof *target_send);
+
+        if (strided == BOTH_STRIDED) {
+            target_strides[0] = stride * (sizeof *target_send);
+            origin_strides[0] = stride * (sizeof *target_send);
+        }
+
         count[0] = sizeof *target_send;
         count[1] = MAX_COUNT;
 
