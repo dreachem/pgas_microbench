@@ -53,9 +53,10 @@ void run_strided_put_bidir_bw_test(strided_type_t strided);
 void run_strided_get_bidir_bw_test(strided_type_t strided);
 
 
+const int TIMEOUT = 5;
 const size_t SEGMENT_SIZE = 30*1024*1024;
 const size_t MAX_MSG_SIZE = 4*1024*1024;
-const long long LAT_NITER = 1000000;
+const long long LAT_NITER = 10000;
 const long long BW_NITER = 10000;
 
 const int NUM_STATS = 32;
@@ -149,13 +150,8 @@ int main(int argc, char **argv)
 
     run_put_bw_test(0);
     run_get_bw_test(0);
-    run_strided_put_bw_test();
-    run_strided_get_bw_test();
-
     run_put_bidir_bw_test(0);
     run_get_bidir_bw_test(0);
-    run_strided_put_bidir_bw_test();
-    run_strided_get_bidir_bw_test();
 
     run_strided_put_bw_test(TARGET_STRIDED);
     run_strided_put_bw_test(ORIGIN_STRIDED);
@@ -463,10 +459,16 @@ void run_put_bw_test(int do_bulk)
             if (do_bulk) {
                 for (i = 0; i < nrep; i++) {
                     gasnet_put_bulk(partner, target_recv, origin_send, msg_size);
+                    if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                      nrep = i;
+                    }
                 }
             } else {
                 for (i = 0; i < nrep; i++) {
                     gasnet_put(partner, target_recv, origin_send, msg_size);
+                    if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                      nrep = i;
+                    }
                 }
             }
             t2 = MPI_Wtime();
@@ -528,10 +530,16 @@ void run_get_bw_test(do_bulk)
                 for (i = 0; i < nrep; i++) {
                     gasnet_get_bulk(origin_recv, partner, target_send,
                                     msg_size);
+                    if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                      nrep = i;
+                    }
                 }
             } else {
                 for (i = 0; i < nrep; i++) {
                     gasnet_get(origin_recv, partner, target_send, msg_size);
+                    if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                      nrep = i;
+                    }
                 }
             }
             t2 = MPI_Wtime();
@@ -618,6 +626,9 @@ void run_strided_put_bw_test(strided_type_t strided)
             for (i = 0; i < nrep; i++) {
                 gasnet_puts_bulk(partner, target_recv, target_strides,
                                  origin_send, origin_strides, count, 1);
+                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                  nrep = i;
+                }
             }
             t2 = MPI_Wtime();
 
@@ -704,6 +715,9 @@ void run_strided_get_bw_test(strided_type_t strided)
                 gasnet_gets_bulk(origin_recv, origin_strides,
                         partner, target_send, target_strides,
                         count, 1);
+                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                  nrep = i;
+                }
             }
             t2 = MPI_Wtime();
 
@@ -767,10 +781,16 @@ void run_put_bidir_bw_test(int do_bulk)
         if (do_bulk) {
             for (i = 0; i < nrep; i++) {
                 gasnet_put_bulk(partner, target_recv, origin_send, msg_size);
+                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                  nrep = i;
+                }
             }
         } else {
             for (i = 0; i < nrep; i++) {
                 gasnet_put(partner, target_recv, origin_send, msg_size);
+                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                  nrep = i;
+                }
             }
         }
         t2 = MPI_Wtime();
@@ -829,10 +849,16 @@ void run_get_bidir_bw_test(int do_bulk)
         if (do_bulk) {
             for (i = 0; i < nrep; i++) {
                 gasnet_get_bulk(origin_recv, partner, target_send, msg_size);
+                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                  nrep = i;
+                }
             }
         } else {
             for (i = 0; i < nrep; i++) {
                 gasnet_get(origin_recv, partner, target_send, msg_size);
+                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                  nrep = i;
+                }
             }
         }
         t2 = MPI_Wtime();
@@ -916,6 +942,9 @@ void run_strided_put_bidir_bw_test(strided_type_t strided)
         for (i = 0; i < nrep; i++) {
             gasnet_puts_bulk(partner, target_recv, target_strides,
                              origin_send, origin_strides, count, 1);
+            if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+              nrep = i;
+            }
         }
         t2 = MPI_Wtime();
 
@@ -999,6 +1028,9 @@ void run_strided_get_bidir_bw_test(strided_type_t strided)
             gasnet_gets_bulk(origin_recv, origin_strides,
                     partner, target_send, target_strides,
                     count, 1);
+            if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+              nrep = i;
+            }
         }
         t2 = MPI_Wtime();
 

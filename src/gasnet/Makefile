@@ -3,16 +3,15 @@
 #    CONDUIT: to specify a specific conduit you wish to test
 
 GASNET_ROOT ?=
-CONDUIT ?= mpi
+CONDUIT ?= ibv
 MPICC = mpicc
 
-MPI_CFLAGS = -I/usr/lib/openmpi/include -pthread -I/usr/lib/openmpi/lib
 DEBUG = -D_DEBUG
 
 include $(GASNET_ROOT)/include/$(CONDUIT)-conduit/$(CONDUIT)-par.mak
 
 gasnet_tests: gasnet_tests.o
-	$(MPICC) $(GASNET_LDFLAGS) -o $@ $^ $(GASNET_LIBS)
+	$(GASNET_LD) $(GASNET_LDFLAGS) -o $@ $^ $(GASNET_LIBS)
 
 gasnet_tests.o: gasnet_tests.c
 	$(GASNET_CC) -c $(GASNET_CPPFLAGS) $(GASNET_CFLAGS) $(MPI_CFLAGS) $(DEBUG) $< -o $@
