@@ -35,13 +35,13 @@ void run_getput_latency_test(sync_type_t sync);
 void run_putput_latency_test(sync_type_t sync);
 void run_getget_latency_test(sync_type_t sync);
 
-void run_put_bw_test(int do_bulk);
-void run_get_bw_test(int do_bulk);
+void run_put_bw_test();
+void run_get_bw_test();
 void run_strided_put_bw_test(strided_type_t strided);
 void run_strided_get_bw_test(strided_type_t strided);
 
-void run_put_bidir_bw_test(int do_bulk);
-void run_get_bidir_bw_test(int do_bulk);
+void run_put_bidir_bw_test();
+void run_get_bidir_bw_test();
 void run_strided_put_bidir_bw_test(strided_type_t strided);
 void run_strided_get_bidir_bw_test(strided_type_t strided);
 
@@ -129,11 +129,11 @@ int main(int argc, char **argv)
     run_getget_latency_test(BARRIER);
     run_getget_latency_test(P2P);
 
-#if 0
-    run_put_bw_test(0);
-    run_get_bw_test(0);
-    run_put_bidir_bw_test(0);
-    run_get_bidir_bw_test(0);
+#if 1
+    run_put_bw_test();
+    run_get_bw_test();
+    run_put_bidir_bw_test();
+    run_get_bidir_bw_test();
 
     run_strided_put_bw_test(TARGET_STRIDED);
     run_strided_put_bw_test(ORIGIN_STRIDED);
@@ -149,7 +149,6 @@ int main(int argc, char **argv)
     run_strided_get_bidir_bw_test(ORIGIN_STRIDED);
     run_strided_get_bidir_bw_test(BOTH_STRIDED);
 
-    gasnet_exit(0);
 #endif
 
     ARMCI_Finalize();
@@ -408,12 +407,12 @@ void run_getget_latency_test(sync_type_t sync)
     }
 }
 
-#if 0
+#if 1
 /********************************************************************
  *                      1-Way Bandwidth Tests
  ********************************************************************/
 
-void run_put_bw_test(int do_bulk)
+void run_put_bw_test()
 {
     int *origin_send, *target_recv;
     double t1, t2;
@@ -430,8 +429,8 @@ void run_put_bw_test(int do_bulk)
     stats = stats_buffer;
 
     if (my_node == 0) {
-        printf("\n\n1-way %s Put Bandwidth: (%d pairs)\n",
-               do_bulk ? "(bulk)": "", num_pairs);
+        printf("\n\n1-way Put Bandwidth: (%d pairs)\n",
+               num_pairs);
         printf("%20s %20s %20s\n", "blksize", "nrep", "bandwidth");
     }
     num_stats = 0;
@@ -442,19 +441,10 @@ void run_put_bw_test(int do_bulk)
         if (my_node < partner) {
             size_t msg_size = blksize * (sizeof *origin_send);
             t1 = MPI_Wtime();
-            if (do_bulk) {
-                for (i = 0; i < nrep; i++) {
-                    gasnet_put_bulk(partner, target_recv, origin_send, msg_size);
-                    if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
-                      nrep = i;
-                    }
-                }
-            } else {
-                for (i = 0; i < nrep; i++) {
-                    gasnet_put(partner, target_recv, origin_send, msg_size);
-                    if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
-                      nrep = i;
-                    }
+            for (i = 0; i < nrep; i++) {
+                ARMCI_Put(origin_send, target_recv, msg_size, partner);
+                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                  nrep = i;
                 }
             }
             t2 = MPI_Wtime();
@@ -462,16 +452,15 @@ void run_put_bw_test(int do_bulk)
             stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
         }
 
-        gasnet_barrier_notify(0,0);
-        gasnet_barrier_wait(0,0);
+        ARMCI_Barrier();
 
         if (my_node == 0) {
             /* collect stats from other nodes */
             for (i = 1; i < num_pairs; i++) {
                 double bw_other;
                 double *stats_other = REMOTE_ADDRESS(stats, i);
-                gasnet_get(&bw_other, i, &stats_other[num_stats],
-                           sizeof(bw_other));
+                ARMCI_Get(&stats_other[num_stats], &bw_other,
+                          sizeof(bw_other), i);
                 stats[num_stats] += bw_other;
             }
 
@@ -483,7 +472,7 @@ void run_put_bw_test(int do_bulk)
     }
 }
 
-void run_get_bw_test(do_bulk)
+void run_get_bw_test()
 {
     int *origin_recv, *target_send;
     double t1, t2;
@@ -500,8 +489,8 @@ void run_get_bw_test(do_bulk)
     stats = stats_buffer;
 
     if (my_node == 0) {
-        printf("\n\n1-way %s Get Bandwidth (%d pairs):\n",
-               do_bulk ? "(bulk)":"", num_pairs);
+        printf("\n\n1-way Get Bandwidth (%d pairs):\n",
+               num_pairs);
         printf("%20s %20s %20s\n", "blksize", "nrep", "bandwidth");
     }
     num_stats = 0;
@@ -512,20 +501,11 @@ void run_get_bw_test(do_bulk)
         if (my_node < partner) {
             size_t msg_size = blksize * (sizeof *target_send);
             t1 = MPI_Wtime();
-            if (do_bulk) {
-                for (i = 0; i < nrep; i++) {
-                    gasnet_get_bulk(origin_recv, partner, target_send,
-                                    msg_size);
-                    if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
-                      nrep = i;
-                    }
-                }
-            } else {
-                for (i = 0; i < nrep; i++) {
-                    gasnet_get(origin_recv, partner, target_send, msg_size);
-                    if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
-                      nrep = i;
-                    }
+            for (i = 0; i < nrep; i++) {
+                ARMCI_Get(target_send, origin_recv, msg_size,
+                          partner);
+                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                  nrep = i;
                 }
             }
             t2 = MPI_Wtime();
@@ -533,16 +513,15 @@ void run_get_bw_test(do_bulk)
             stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
         }
 
-        gasnet_barrier_notify(0,0);
-        gasnet_barrier_wait(0,0);
+        ARMCI_Barrier();
 
         if (my_node == 0) {
             /* collect stats from other nodes */
             for (i = 1; i < num_pairs; i++) {
                 double bw_other;
                 double *stats_other = REMOTE_ADDRESS(stats, i);
-                gasnet_get(&bw_other, i, &stats_other[num_stats],
-                           sizeof(bw_other));
+                ARMCI_Get(&stats_other[num_stats], &bw_other,
+                          sizeof(bw_other), i);
                 stats[num_stats] += bw_other;
             }
 
@@ -587,8 +566,8 @@ void run_strided_put_bw_test(strided_type_t strided)
         int nrep = BW_NITER;
 
         if (my_node < partner) {
-            size_t origin_strides[1], target_strides[1];
-            size_t count[2];
+            int origin_strides[1], target_strides[1];
+            int count[2];
             size_t msg_size = MAX_COUNT * (sizeof *origin_send);
 
             target_strides[0] = sizeof *origin_send;
@@ -610,8 +589,8 @@ void run_strided_put_bw_test(strided_type_t strided)
 
             t1 = MPI_Wtime();
             for (i = 0; i < nrep; i++) {
-                gasnet_puts_bulk(partner, target_recv, target_strides,
-                                 origin_send, origin_strides, count, 1);
+                ARMCI_PutS(origin_send, origin_strides, target_recv,
+                           target_strides, count, 1, partner);
                 if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
@@ -621,16 +600,15 @@ void run_strided_put_bw_test(strided_type_t strided)
             stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
         }
 
-        gasnet_barrier_notify(0,0);
-        gasnet_barrier_wait(0,0);
+        ARMCI_Barrier();
 
         if (my_node == 0) {
             /* collect stats from other nodes */
             for (i = 1; i < num_pairs; i++) {
                 double bw_other;
                 double *stats_other = REMOTE_ADDRESS(stats, i);
-                gasnet_get(&bw_other, i, &stats_other[num_stats],
-                           sizeof(bw_other));
+                ARMCI_Get(&stats_other[num_stats], &bw_other,
+                          sizeof(bw_other), i);
                 stats[num_stats] += bw_other;
             }
 
@@ -675,8 +653,8 @@ void run_strided_get_bw_test(strided_type_t strided)
         int nrep = BW_NITER;
 
         if (my_node < partner) {
-            size_t origin_strides[1], target_strides[1];
-            size_t count[2];
+            int origin_strides[1], target_strides[1];
+            int count[2];
             size_t msg_size = MAX_COUNT * (sizeof *target_send);
 
             origin_strides[0] = sizeof *target_send;
@@ -698,9 +676,8 @@ void run_strided_get_bw_test(strided_type_t strided)
 
             t1 = MPI_Wtime();
             for (i = 0; i < nrep; i++) {
-                gasnet_gets_bulk(origin_recv, origin_strides,
-                        partner, target_send, target_strides,
-                        count, 1);
+                ARMCI_GetS(target_send, target_strides, origin_recv,
+                           origin_strides, count, 1, partner);
                 if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
@@ -710,16 +687,15 @@ void run_strided_get_bw_test(strided_type_t strided)
             stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
         }
 
-        gasnet_barrier_notify(0,0);
-        gasnet_barrier_wait(0,0);
+        ARMCI_Barrier();
 
         if (my_node == 0) {
             /* collect stats from other nodes */
             for (i = 1; i < num_pairs; i++) {
                 double bw_other;
                 double *stats_other = REMOTE_ADDRESS(stats, i);
-                gasnet_get(&bw_other, i, &stats_other[num_stats],
-                           sizeof(bw_other));
+                ARMCI_Get(&stats_other[num_stats], &bw_other,
+                          sizeof(bw_other), i);
                 stats[num_stats] += bw_other;
             }
 
@@ -736,7 +712,7 @@ void run_strided_get_bw_test(strided_type_t strided)
  *                      2-Way Bandwidth Tests
  ********************************************************************/
 
-void run_put_bidir_bw_test(int do_bulk)
+void run_put_bidir_bw_test()
 {
     int *origin_send, *target_recv;
     double t1, t2;
@@ -753,8 +729,8 @@ void run_put_bidir_bw_test(int do_bulk)
     stats = stats_buffer;
 
     if (my_node == 0) {
-        printf("\n\n2-way %s Put Bandwidth: (%d pairs)\n",
-               do_bulk ? "(bulk)": "", num_pairs);
+        printf("\n\n2-way Put Bandwidth: (%d pairs)\n",
+               num_pairs);
         printf("%20s %20s %20s\n", "blksize", "nrep", "bandwidth");
     }
     num_stats = 0;
@@ -764,35 +740,25 @@ void run_put_bidir_bw_test(int do_bulk)
         size_t msg_size = blksize * (sizeof *origin_send);
 
         t1 = MPI_Wtime();
-        if (do_bulk) {
-            for (i = 0; i < nrep; i++) {
-                gasnet_put_bulk(partner, target_recv, origin_send, msg_size);
-                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
-                  nrep = i;
-                }
-            }
-        } else {
-            for (i = 0; i < nrep; i++) {
-                gasnet_put(partner, target_recv, origin_send, msg_size);
-                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
-                  nrep = i;
-                }
+        for (i = 0; i < nrep; i++) {
+            ARMCI_Put(origin_send, target_recv, msg_size, partner);
+            if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+              nrep = i;
             }
         }
         t2 = MPI_Wtime();
 
         stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
 
-        gasnet_barrier_notify(0,0);
-        gasnet_barrier_wait(0,0);
+        ARMCI_Barrier();
 
         if (my_node == 0) {
             /* collect stats from other nodes */
             for (i = 1; i < num_active_nodes; i++) {
                 double bw_other;
                 double *stats_other = REMOTE_ADDRESS(stats, i);
-                gasnet_get(&bw_other, i, &stats_other[num_stats],
-                           sizeof(bw_other));
+                ARMCI_Get(&stats_other[num_stats], &bw_other,
+                          sizeof(bw_other), i);
                 stats[num_stats] += bw_other;
             }
 
@@ -804,7 +770,7 @@ void run_put_bidir_bw_test(int do_bulk)
     }
 }
 
-void run_get_bidir_bw_test(int do_bulk)
+void run_get_bidir_bw_test()
 {
     int *origin_recv, *target_send;
     double t1, t2;
@@ -821,8 +787,8 @@ void run_get_bidir_bw_test(int do_bulk)
     stats = stats_buffer;
 
     if (my_node == 0) {
-        printf("\n\n2-way %s Get Bandwidth (%d pairs):\n",
-               do_bulk ? "(bulk)":"", num_pairs);
+        printf("\n\n2-way Get Bandwidth (%d pairs):\n",
+               num_pairs);
         printf("%20s %20s %20s\n", "blksize", "nrep", "bandwidth");
     }
     num_stats = 0;
@@ -832,35 +798,26 @@ void run_get_bidir_bw_test(int do_bulk)
         size_t msg_size = blksize * (sizeof *target_send);
 
         t1 = MPI_Wtime();
-        if (do_bulk) {
-            for (i = 0; i < nrep; i++) {
-                gasnet_get_bulk(origin_recv, partner, target_send, msg_size);
-                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
-                  nrep = i;
-                }
-            }
-        } else {
-            for (i = 0; i < nrep; i++) {
-                gasnet_get(origin_recv, partner, target_send, msg_size);
-                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
-                  nrep = i;
-                }
+        for (i = 0; i < nrep; i++) {
+            ARMCI_Get(target_send, origin_recv, msg_size,
+                    partner);
+            if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                nrep = i;
             }
         }
         t2 = MPI_Wtime();
 
         stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
 
-        gasnet_barrier_notify(0,0);
-        gasnet_barrier_wait(0,0);
+        ARMCI_Barrier();
 
         if (my_node == 0) {
             /* collect stats from other nodes */
             for (i = 1; i < num_active_nodes; i++) {
                 double bw_other;
                 double *stats_other = REMOTE_ADDRESS(stats, i);
-                gasnet_get(&bw_other, i, &stats_other[num_stats],
-                           sizeof(bw_other));
+                ARMCI_Get(&stats_other[num_stats], &bw_other,
+                          sizeof(bw_other), i);
                 stats[num_stats] += bw_other;
             }
 
@@ -902,8 +859,8 @@ void run_strided_put_bidir_bw_test(strided_type_t strided)
     num_stats = 0;
     for (stride = 1; stride <= MAX_STRIDE; stride *= 2) {
         int i;
-        size_t origin_strides[1], target_strides[1];
-        size_t count[2];
+        int origin_strides[1], target_strides[1];
+        int count[2];
         int nrep = BW_NITER;
         size_t msg_size = MAX_COUNT * (sizeof *origin_send);
 
@@ -926,8 +883,8 @@ void run_strided_put_bidir_bw_test(strided_type_t strided)
 
         t1 = MPI_Wtime();
         for (i = 0; i < nrep; i++) {
-            gasnet_puts_bulk(partner, target_recv, target_strides,
-                             origin_send, origin_strides, count, 1);
+            ARMCI_PutS(origin_send, origin_strides, target_recv,
+                    target_strides, count, 1, partner);
             if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
               nrep = i;
             }
@@ -936,16 +893,15 @@ void run_strided_put_bidir_bw_test(strided_type_t strided)
 
         stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
 
-        gasnet_barrier_notify(0,0);
-        gasnet_barrier_wait(0,0);
+        ARMCI_Barrier();
 
         if (my_node == 0) {
             /* collect stats from other nodes */
             for (i = 1; i < num_active_nodes; i++) {
                 double bw_other;
                 double *stats_other = REMOTE_ADDRESS(stats, i);
-                gasnet_get(&bw_other, i, &stats_other[num_stats],
-                           sizeof(bw_other));
+                ARMCI_Get(&stats_other[num_stats], &bw_other,
+                          sizeof(bw_other), i);
                 stats[num_stats] += bw_other;
             }
 
@@ -987,8 +943,8 @@ void run_strided_get_bidir_bw_test(strided_type_t strided)
     num_stats = 0;
     for (stride = 1; stride <= MAX_STRIDE; stride *= 2) {
         int i;
-        size_t origin_strides[1], target_strides[1];
-        size_t count[2];
+        int origin_strides[1], target_strides[1];
+        int count[2];
         int nrep = BW_NITER;
         size_t msg_size = MAX_COUNT * (sizeof *target_send);
 
@@ -1011,9 +967,8 @@ void run_strided_get_bidir_bw_test(strided_type_t strided)
 
         t1 = MPI_Wtime();
         for (i = 0; i < nrep; i++) {
-            gasnet_gets_bulk(origin_recv, origin_strides,
-                    partner, target_send, target_strides,
-                    count, 1);
+            ARMCI_GetS(target_send, target_strides, origin_recv,
+                    origin_strides, count, 1, partner);
             if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
               nrep = i;
             }
@@ -1022,16 +977,15 @@ void run_strided_get_bidir_bw_test(strided_type_t strided)
 
         stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
 
-        gasnet_barrier_notify(0,0);
-        gasnet_barrier_wait(0,0);
+        ARMCI_Barrier();
 
         if (my_node == 0) {
             /* collect stats from other nodes */
             for (i = 1; i < num_active_nodes; i++) {
                 double bw_other;
                 double *stats_other = REMOTE_ADDRESS(stats, i);
-                gasnet_get(&bw_other, i, &stats_other[num_stats],
-                           sizeof(bw_other));
+                ARMCI_Get(&stats_other[num_stats], &bw_other,
+                          sizeof(bw_other), i);
                 stats[num_stats] += bw_other;
             }
 
