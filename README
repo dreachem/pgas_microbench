@@ -75,3 +75,18 @@ GET fixed-sized (size M) message from target with stride S, N times
 
 Bandwidth =  M*N / (t2 - t1)
 
+-----------------------------------------------
+
+Random Put Bandwidth Test:
+
+PUT message of size M to random address at random target N times.
+
+Bandwidth = M*N / (t2 - t1)
+
+-----------------------------------------------
+
+Random Get Bandwidth Test:
+
+GET message of size M from random address at random target N times.
+
+Bandwidth = M*N / (t2 - t1)

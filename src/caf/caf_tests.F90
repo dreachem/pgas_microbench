@@ -5,6 +5,7 @@
 !
 
 module caf_microbenchmarks
+    use, intrinsic :: iso_fortran_env
     implicit none
 
     include 'mpif.h'
@@ -18,7 +19,7 @@ module caf_microbenchmarks
 
     integer, parameter :: BUFFER_SIZE = 1024*1024
     integer, parameter :: LAT_NITER = 10000
-    integer, parameter :: BW_NITER = 10000
+    integer, parameter :: BW_NITER = 1000
 
     integer, parameter :: TIMEOUT = 5
 
@@ -26,8 +27,9 @@ module caf_microbenchmarks
 
     integer, parameter :: NUM_STATS = 32
 
-    integer, allocatable :: send_buffer(:)[:]
-    integer, allocatable :: recv_buffer(:)[:]
+    type(lock_type) :: image_lock[*]
+    integer :: send_buffer(BUFFER_SIZE)[*]
+    integer :: recv_buffer(BUFFER_SIZE)[*]
     double precision, allocatable :: stats_buffer(:)[:]
 
     integer :: partner
@@ -76,7 +78,7 @@ module caf_microbenchmarks
             t1 = MPI_WTIME()
             do i = 1, LAT_NITER
               recv_buffer(1)[partner] = send_buffer(1)
-              recv_buffer(1) = send_buffer(1)[partner]
+              recv_buffer(1) = recv_buffer(1)[partner]
             end do
             t2 = MPI_WTIME()
 
@@ -266,7 +268,7 @@ module caf_microbenchmarks
                   stats_buffer(num_stats) = stats_buffer(num_stats) + &
                                             stats_buffer(num_stats)[i]
               end do
-              write (*, '(I20,I20,F17.3, " MB/S")') &
+              write (*, '(I20,I20,F17.3, " MB/s")') &
                      blksize, nrep, stats_buffer(num_stats)/num_pairs
           end if
 
@@ -322,14 +324,141 @@ module caf_microbenchmarks
                   stats_buffer(num_stats) = stats_buffer(num_stats) + &
                                             stats_buffer(num_stats)[i]
               end do
-              write (*, '(I20,I20,F17.3, " MB/S")') &
-                     blksize, nrep, stats_buffer(num_stats)/num_pairs
+              write (*, '(I20,I20,F17.3, " MB/s")') &
+                      blksize, nrep, stats_buffer(num_stats)/num_pairs
           end if
 
           num_stats = num_stats + 1
           blksize = blksize * 2
         end do
     end subroutine run_get_bw_test
+
+    subroutine run_rand_put_bw_test()
+        implicit none
+        double precision :: t1, t2
+        integer :: ti, ni, nrep
+        integer :: num_stats
+        integer :: num_pairs
+        integer :: blksize
+        integer :: i
+        integer :: rand_seed, rand_index, rand_image
+        real    :: real_rand_num
+
+        ti = this_image()
+        ni = num_images()
+        num_pairs = num_active_images / 2
+
+        if (ti == 1) then
+            write (*,'(//,"1-Way Random Put Bandwith")')
+            write (*,'(A20, A20, A20)') "blksize", "nrep", "bandwidth"
+        end if
+
+        num_stats = 1
+        blksize = 1
+        do while (blksize <= BUFFER_SIZE/2)
+          nrep = BW_NITER
+
+          t1 = MPI_WTIME()
+          do i = 1, nrep
+            rand_seed = i*this_image()
+            call random_seed(rand_seed)
+            call random_number(real_rand_num)
+            rand_index = INT(real_rand_num*BUFFER_SIZE/2)
+            call random_number(real_rand_num)
+            rand_image = INT(real_rand_num*num_images())+1
+            lock (image_lock[rand_image])
+            recv_buffer(rand_index:rand_index+blksize-1)[rand_image] = &
+                send_buffer(1:blksize)
+            unlock (image_lock[rand_image])
+            if (mod(i,10) == 0 .and. (MPI_WTIME()-t1) > TIMEOUT) then
+              nrep = i
+              exit
+            end if
+          end do
+          t2 = MPI_WTIME()
+
+          stats_buffer(num_stats) = &
+              dble(blksize)*ELEM_SIZE*nrep/(1024*1024*(t2-t1))
+
+          sync all
+
+          if (ti == 1) then
+              do i = 2, num_images()
+                  stats_buffer(num_stats) = stats_buffer(num_stats) + &
+                                            stats_buffer(num_stats)[i]
+              end do
+              write (*, '(I20,I20,F17.3, " MB/s")') &
+                     blksize, nrep, stats_buffer(num_stats)/num_images()
+          end if
+
+          num_stats = num_stats + 1
+          blksize = blksize * 2
+        end do
+
+    end subroutine run_rand_put_bw_test
+
+    subroutine run_rand_get_bw_test()
+        implicit none
+        double precision :: t1, t2
+        integer :: ti, ni, nrep
+        integer :: num_stats
+        integer :: num_pairs
+        integer :: blksize
+        integer :: i
+        integer :: rand_seed, rand_index, rand_image
+        real    :: real_rand_num
+
+        ti = this_image()
+        ni = num_images()
+        num_pairs = num_active_images / 2
+
+        if (ti == 1) then
+            write (*,'(//,"1-Way Random Get Bandwith")')
+            write (*,'(A20, A20, A20)') "blksize", "nrep", "bandwidth"
+        end if
+
+        num_stats = 1
+        blksize = 1
+        do while (blksize <= BUFFER_SIZE)
+          nrep = BW_NITER
+
+          t1 = MPI_WTIME()
+          do i = 1, nrep
+            rand_seed = i*this_image()
+            call random_seed(rand_seed)
+            call random_number(real_rand_num)
+            rand_index = INT(real_rand_num*BUFFER_SIZE/2)
+            call random_number(real_rand_num)
+            rand_image = INT(real_rand_num*num_images())+1
+            lock (image_lock[rand_image])
+            recv_buffer(1:blksize) = &
+                 send_buffer(rand_index:rand_index+blksize-1)[rand_image]
+            unlock (image_lock[rand_image])
+            if (mod(i,10) == 0 .and. (MPI_WTIME()-t1) > TIMEOUT) then
+              nrep = i
+              exit
+            end if
+          end do
+          t2 = MPI_WTIME()
+
+          stats_buffer(num_stats) = &
+              dble(blksize)*ELEM_SIZE*nrep/(1024*1024*(t2-t1))
+
+          sync all
+
+          if (ti == 1) then
+              do i = 2, num_images()
+                  stats_buffer(num_stats) = stats_buffer(num_stats) + &
+                                            stats_buffer(num_stats)[i]
+              end do
+              write (*, '(I20,I20,F17.3, " MB/s")') &
+                     blksize, nrep, stats_buffer(num_stats)/num_images()
+          end if
+
+          num_stats = num_stats + 1
+          blksize = blksize * 2
+        end do
+    end subroutine run_rand_get_bw_test
 
     subroutine run_strided_put_bw_test(strided)
         implicit none
@@ -414,7 +543,7 @@ module caf_microbenchmarks
                   stats_buffer(num_stats) = stats_buffer(num_stats) + &
                                             stats_buffer(num_stats)[i]
               end do
-              write (*, '(I20,I20,I20,F17.3, " MB/S")') &
+              write (*, '(I20,I20,I20,F17.3, " MB/s")') &
                      MAX_COUNT, stride, nrep, stats_buffer(num_stats)/num_pairs
           end if
 
@@ -506,7 +635,7 @@ module caf_microbenchmarks
                   stats_buffer(num_stats) = stats_buffer(num_stats) + &
                                             stats_buffer(num_stats)[i]
               end do
-              write (*, '(I20,I20,I20,F17.3, " MB/S")') &
+              write (*, '(I20,I20,I20,F17.3, " MB/s")') &
                      MAX_COUNT, stride, nrep, stats_buffer(num_stats)/num_pairs
           end if
 
@@ -564,7 +693,7 @@ module caf_microbenchmarks
                   stats_buffer(num_stats) = stats_buffer(num_stats) + &
                                             stats_buffer(num_stats)[i]
               end do
-              write (*, '(I20,I20,F17.3, " MB/S")') &
+              write (*, '(I20,I20,F17.3, " MB/s")') &
                      blksize, nrep, stats_buffer(num_stats)/num_active_images
           end if
 
@@ -617,7 +746,7 @@ module caf_microbenchmarks
                   stats_buffer(num_stats) = stats_buffer(num_stats) + &
                                             stats_buffer(num_stats)[i]
               end do
-              write (*, '(I20,I20,F17.3, " MB/S")') &
+              write (*, '(I20,I20,F17.3, " MB/s")') &
                      blksize, nrep, stats_buffer(num_stats)/num_active_images
           end if
 
@@ -707,7 +836,7 @@ module caf_microbenchmarks
                   stats_buffer(num_stats) = stats_buffer(num_stats) + &
                                             stats_buffer(num_stats)[i]
               end do
-              write (*, '(I20,I20,I20,F17.3, " MB/S")') &
+              write (*, '(I20,I20,I20,F17.3, " MB/s")') &
                      MAX_COUNT, stride, nrep, &
                      stats_buffer(num_stats)/num_active_images
           end if
@@ -798,7 +927,7 @@ module caf_microbenchmarks
                   stats_buffer(num_stats) = stats_buffer(num_stats) + &
                                             stats_buffer(num_stats)[i]
               end do
-              write (*, '(I20,I20,I20,F17.3, " MB/S")') &
+              write (*, '(I20,I20,I20,F17.3, " MB/s")') &
                      MAX_COUNT, stride, nrep, &
                      stats_buffer(num_stats)/num_active_images
           end if
@@ -807,6 +936,216 @@ module caf_microbenchmarks
           stride = stride * 2
         end do
     end subroutine run_strided_get_bidir_bw_test
+
+    subroutine run_rand_strided_put_bw_test(strided)
+        implicit none
+
+        integer, intent(in) :: strided
+
+        character (len=15) :: strided_label(3)
+        double precision :: t1, t2
+        integer :: ti, ni, nrep
+        integer :: num_stats
+        integer :: num_pairs
+        integer, parameter :: MAX_COUNT = 32*1024
+        integer, parameter :: MAX_BLKSIZE = BUFFER_SIZE
+        integer, parameter :: MAX_STRIDE = MAX_BLKSIZE / MAX_COUNT
+        integer :: stride,extent
+        integer :: i
+        integer :: rand_seed, rand_image
+        real    :: real_rand_num
+
+        ti = this_image()
+        ni = num_images()
+        num_pairs = num_active_images / 2
+
+        if (ti == 1) then
+            strided_label(1) = "Target Strided"
+            strided_label(2) = "Origin Strided"
+            strided_label(3) = "Both Strided"
+
+            write (*,'(//,"2-Way ",A0," Random Put Bandwith")') &
+                strided_label(strided)
+            write (*,'(A20, A20, A20, A20)') "count", "stride", "nrep", "bandwidth"
+        end if
+
+        num_stats = 1
+        stride = 1
+        do while (stride <= MAX_STRIDE)
+          nrep = BW_NITER
+
+          if (strided == TARGET_STRIDED) then
+              t1 = MPI_WTIME()
+              do i = 1, nrep
+                rand_seed = i*this_image()
+                call random_seed(rand_seed)
+                call random_number(real_rand_num)
+                rand_image = INT(real_rand_num*num_images())+1
+                extent = MAX_COUNT*stride
+                lock (image_lock[rand_image])
+                recv_buffer(1:extent:stride)[partner] = send_buffer(1:MAX_COUNT)
+                unlock (image_lock[rand_image])
+                if (mod(i,10) == 0 .and. (MPI_WTIME()-t1) > TIMEOUT) then
+                  nrep = i
+                  exit
+                end if
+              end do
+              t2 = MPI_WTIME()
+          else if (strided == ORIGIN_STRIDED) then
+              t1 = MPI_WTIME()
+              do i = 1, nrep
+                rand_seed = i*this_image()
+                call random_seed(rand_seed)
+                call random_number(real_rand_num)
+                rand_image = INT(real_rand_num*num_images())+1
+                extent = MAX_COUNT*stride
+                lock (image_lock[rand_image])
+                recv_buffer(1:MAX_COUNT)[partner] = send_buffer(1:extent:stride)
+                unlock (image_lock[rand_image])
+                if (mod(i,10) == 0 .and. (MPI_WTIME()-t1) > TIMEOUT) then
+                  nrep = i
+                  exit
+                end if
+              end do
+              t2 = MPI_WTIME()
+          else
+              t1 = MPI_WTIME()
+              do i = 1, nrep
+                rand_seed = i*this_image()
+                call random_seed(rand_seed)
+                call random_number(real_rand_num)
+                rand_image = INT(real_rand_num*num_images())+1
+                extent = MAX_COUNT*stride
+                lock (image_lock[rand_image])
+                recv_buffer(1:extent:stride)[partner] = &
+                             send_buffer(1:extent:stride)
+                unlock (image_lock[rand_image])
+                if (mod(i,10) == 0 .and. (MPI_WTIME()-t1) > TIMEOUT) then
+                  nrep = i
+                  exit
+                end if
+              end do
+              t2 = MPI_WTIME()
+          end if
+
+          stats_buffer(num_stats) = &
+              dble(MAX_COUNT)*ELEM_SIZE*nrep/(1024*1024*(t2-t1))
+
+          sync all
+
+          if (ti == 1) then
+              do i = 2, num_images()
+                  stats_buffer(num_stats) = stats_buffer(num_stats) + &
+                                            stats_buffer(num_stats)[i]
+              end do
+              write (*, '(I20,I20,I20,F17.3, " MB/s")') &
+                     MAX_COUNT, stride, nrep, &
+                     stats_buffer(num_stats)/num_images()
+          end if
+
+          num_stats = num_stats + 1
+          stride = stride * 2
+        end do
+    end subroutine run_rand_strided_put_bw_test
+
+    subroutine run_rand_strided_get_bw_test(strided)
+        implicit none
+
+        integer, intent(in) :: strided
+
+        character (len=15) :: strided_label(3)
+        double precision :: t1, t2
+        integer :: ti, ni, nrep
+        integer :: num_stats
+        integer :: num_pairs
+        integer, parameter :: MAX_COUNT = 32*1024
+        integer, parameter :: MAX_BLKSIZE = BUFFER_SIZE
+        integer, parameter :: MAX_STRIDE = MAX_BLKSIZE / MAX_COUNT
+        integer :: stride,extent
+        integer :: i
+        integer :: rand_seed, rand_image
+        real    :: real_rand_num
+
+        ti = this_image()
+        ni = num_images()
+        num_pairs = num_active_images / 2
+
+        if (ti == 1) then
+            strided_label(1) = "Target Strided"
+            strided_label(2) = "Origin Strided"
+            strided_label(3) = "Both Strided"
+
+            write (*,'(//,"2-Way ",A0, " Random Get Bandwith ")') &
+                strided_label(strided)
+            write (*,'(A20, A20, A20, A20)') "count", "stride", "nrep", "bandwidth"
+        end if
+
+        num_stats = 1
+        stride = 1
+        do while (stride <= MAX_STRIDE)
+          nrep = BW_NITER
+
+          if (strided == TARGET_STRIDED) then
+              t1 = MPI_WTIME()
+              do i = 1, nrep
+                rand_seed = i*this_image()
+                call random_seed(rand_seed)
+                call random_number(real_rand_num)
+                rand_image = INT(real_rand_num*num_images())+1
+                extent = MAX_COUNT*stride
+                lock (image_lock[rand_image])
+                recv_buffer(1:MAX_COUNT) = send_buffer(1:extent:stride)[partner]
+                unlock (image_lock[rand_image])
+                if (mod(i,10) == 0 .and. (MPI_WTIME()-t1) > TIMEOUT) then
+                  nrep = i
+                  exit
+                end if
+              end do
+              t2 = MPI_WTIME()
+          else if (strided == ORIGIN_STRIDED) then
+              t1 = MPI_WTIME()
+              do i = 1, nrep
+                extent = MAX_COUNT*stride
+                recv_buffer(1:extent:stride) = send_buffer(1:MAX_COUNT)[partner]
+                if (mod(i,10) == 0 .and. (MPI_WTIME()-t1) > TIMEOUT) then
+                  nrep = i
+                  exit
+                end if
+              end do
+              t2 = MPI_WTIME()
+          else
+              t1 = MPI_WTIME()
+              do i = 1, nrep
+                extent = MAX_COUNT*stride
+                recv_buffer(1:extent:stride) = &
+                             send_buffer(1:extent:stride)[partner]
+                if (mod(i,10) == 0 .and. (MPI_WTIME()-t1) > TIMEOUT) then
+                  nrep = i
+                  exit
+                end if
+              end do
+              t2 = MPI_WTIME()
+          end if
+
+          stats_buffer(num_stats) = &
+              dble(MAX_COUNT)*ELEM_SIZE*nrep/(1024*1024*(t2-t1))
+
+          sync all
+
+          if (ti == 1) then
+              do i = 2, num_images()
+                  stats_buffer(num_stats) = stats_buffer(num_stats) + &
+                                            stats_buffer(num_stats)[i]
+              end do
+              write (*, '(I20,I20,I20,F17.3, " MB/s")') &
+                     MAX_COUNT, stride, nrep, &
+                     stats_buffer(num_stats)/num_images()
+          end if
+
+          num_stats = num_stats + 1
+          stride = stride * 2
+        end do
+    end subroutine run_rand_strided_get_bw_test
 end module caf_microbenchmarks
 
 program main
@@ -814,20 +1153,13 @@ program main
 
     implicit none
 
-    if (num_images() < 2) then
-        error stop "not enough images running"
+    if (mod(num_images(), 2) /= 0) then
+        error stop "use an even number of images"
     end if
 
-    if (mod(num_images(), 2) == 0) then
-        num_active_images = num_images()
-    else
-        num_active_images = num_images() - 1
-    end if
-
+    num_active_images = num_images()
     partner = 1 + mod(this_image()-1+num_active_images/2, num_active_images)
 
-    allocate ( send_buffer(BUFFER_SIZE)[*] )
-    allocate ( recv_buffer(BUFFER_SIZE)[*] )
     allocate ( stats_buffer(NUM_STATS)[*] )
 
     call run_putget_latency_test()
@@ -840,6 +1172,8 @@ program main
     call run_get_bw_test()
     call run_put_bw_bidir_test()
     call run_get_bw_bidir_test()
+    call run_rand_put_bw_test()
+    call run_rand_get_bw_test()
 
     call run_strided_put_bw_test(TARGET_STRIDED)
     call run_strided_put_bw_test(ORIGIN_STRIDED)
@@ -857,4 +1191,11 @@ program main
     call run_strided_get_bidir_bw_test(ORIGIN_STRIDED)
     call run_strided_get_bidir_bw_test(BOTH_STRIDED)
 
+    call run_rand_strided_put_bw_test(TARGET_STRIDED)
+    call run_rand_strided_put_bw_test(ORIGIN_STRIDED)
+    call run_rand_strided_put_bw_test(BOTH_STRIDED)
+
+    call run_rand_strided_get_bw_test(TARGET_STRIDED)
+    call run_rand_strided_get_bw_test(ORIGIN_STRIDED)
+    call run_rand_strided_get_bw_test(BOTH_STRIDED)
 end program
