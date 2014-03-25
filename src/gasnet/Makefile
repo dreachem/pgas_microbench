@@ -3,12 +3,15 @@
 #    CONDUIT: to specify a specific conduit you wish to test
 
 GASNET_ROOT ?=
-CONDUIT ?= ibv
+CONDUIT ?= mpi
 MPICC = mpicc
 
 DEBUG = -D_DEBUG
 
 include $(GASNET_ROOT)/include/$(CONDUIT)-conduit/$(CONDUIT)-par.mak
+
+GASNET_LD = mpicc
+GASNET_CC = mpicc
 
 gasnet_tests: gasnet_tests.o
 	$(GASNET_LD) $(GASNET_LDFLAGS) -o $@ $^ $(GASNET_LIBS)

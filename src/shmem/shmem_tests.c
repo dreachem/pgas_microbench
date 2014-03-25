@@ -1,5 +1,5 @@
 /*
- * Microbenchmarks for ARMCI
+ * Microbenchmarks for SHMEM
  *
  * (C) HPCTools Group, University of Houston
  *
@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <mpi.h>
-#include "armci.h"
+#include <shmem.h>
 
 
 typedef enum {
@@ -62,9 +62,6 @@ static int *send_buffer;
 static int *recv_buffer;
 static double *stats_buffer;
 static int *sync_notify_buffer;
-
-#define REMOTE_ADDRESS(a,p) \
-    (a) + ((char *)seginfo[(p)] - (char*)segment_start)/(sizeof *(a))
 
 
 int main(int argc, char **argv)
@@ -127,9 +124,9 @@ void print_sendrecv_address()
     int *origin_recv, *target_send;
 
     origin_send = send_buffer;
-    target_recv = REMOTE_ADDRESS(recv_buffer, partner);
+    target_recv = shmem_ptr(recv_buffer, partner);
     origin_recv = recv_buffer;
-    target_send = REMOTE_ADDRESS(send_buffer, partner);
+    target_send = shmem_ptr(send_buffer, partner);
 
     printf("%d: osend: %p, trecv: %p, orecv: %p, tsend: %p\n",
             my_node, origin_send, target_recv, origin_recv, target_send);
@@ -178,32 +175,13 @@ void do_sync(sync_type_t sync)
 
 void do_sync_notify(int partner)
 {
-#if 0
-    int ret;
-    void *partner_sync = REMOTE_ADDRESS(&sync_notify_buffer[my_node],
-                                        partner);
-    ARMCI_Rmw(ARMCI_FETCH_AND_ADD, &ret, partner_sync, 1, partner);
-#endif
+    shmem_int_inc(&sync_notify_buffer[my_node], partner);
 }
 
 void do_sync_wait(int partner)
 {
-#if 0
-    const unsigned long SLEEP_INTERVAL = 1000000;
-    unsigned long count = 0;
-
-    int *partner_sync = &sync_notify_buffer[partner];
-
-    /* wait on partner */
-    while (*partner_sync == 0) {
-        if (count % SLEEP_INTERVAL == 0) usleep(1);
-        partner_sync = &sync_notify_buffer[partner];
-        count++;
-    }
-
-    /* decrement counter */
-    __sync_fetch_and_add(partner_sync, -1);
-#endif
+    shmem_int_wait(&sync_notify_buffer[partner], 0);
+    shmem_int_add(&sync_notify_buffer[partner], -1, my_node);
 }
 
 /********************************************************************
@@ -221,9 +199,9 @@ void run_putget_latency_test()
 
     num_pairs = num_active_nodes / 2;
     origin_send = send_buffer;
-    target_recv = REMOTE_ADDRESS(recv_buffer, partner);
+    target_recv = recv_buffer;
     origin_recv = recv_buffer;
-    target_send = REMOTE_ADDRESS(send_buffer, partner);
+    target_send = send_buffer;
 
     stats = stats_buffer;
 
@@ -234,25 +212,26 @@ void run_putget_latency_test()
     if (my_node < partner) {
         t1 = MPI_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
-            ARMCI_Put(origin_send, target_recv, sizeof(*target_recv),
-                      partner);
-            ARMCI_Get(target_send, origin_recv, sizeof(*target_recv),
-                      partner);
+            shmem_putmem(target_recv, origin_send, sizeof(*target_recv),
+                         partner);
+            shmem_quiet();
+            shmem_getmem(origin_recv, target_send, sizeof(*target_send),
+                         partner);
         }
         t2 = MPI_Wtime();
 
         stats[0] = 1000000*(t2-t1)/(LAT_NITER);
     }
 
-    ARMCI_Barrier();
+    shmem_barrier_all();
 
     if (my_node == 0) {
         /* collect stats from other active nodes */
         for (i = 1; i < num_pairs; i++) {
             double latency_other;
-            double *stats_other = REMOTE_ADDRESS(stats, i);
-            ARMCI_Get(stats_other, &latency_other, sizeof(latency_other),
-                      i);
+            double *stats_other = stats;
+            shmem_getmem(&latency_other, stats_other, sizeof(latency_other),
+                         i);
             stats[0] += latency_other;
         }
         printf("%20.8lf us\n", stats[0]/num_pairs);
@@ -269,7 +248,7 @@ void run_putput_latency_test(sync_type_t sync)
 
     num_pairs = num_active_nodes / 2;
     origin_send = send_buffer;
-    target_recv = REMOTE_ADDRESS(recv_buffer, partner);
+    target_recv = recv_buffer;
 
     stats = stats_buffer;
 
@@ -281,8 +260,8 @@ void run_putput_latency_test(sync_type_t sync)
     if (my_node < partner) {
         t1 = MPI_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
-            ARMCI_Put(origin_send, target_recv, sizeof(*target_recv),
-                      partner);
+            shmem_putmem(target_recv, origin_send, sizeof(*target_recv),
+                         partner);
             do_sync(sync);
             do_sync(sync);
         }
@@ -293,8 +272,8 @@ void run_putput_latency_test(sync_type_t sync)
         t1 = MPI_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
             do_sync(sync);
-            ARMCI_Put(origin_send, target_recv, sizeof(*target_recv),
-                      partner);
+            shmem_putmem(target_recv, origin_send, sizeof(*target_recv),
+                         partner);
             do_sync(sync);
         }
         t2 = MPI_Wtime();
@@ -302,15 +281,15 @@ void run_putput_latency_test(sync_type_t sync)
         stats[0] = 1000000*(t2-t1)/(LAT_NITER);
     }
 
-    ARMCI_Barrier();
+    shmem_barrier_all();
 
     if (my_node == 0) {
         /* collect stats from other nodes */
         for (i = 1; i < num_active_nodes; i++) {
             double latency_other;
-            double *stats_other = REMOTE_ADDRESS(stats, i);
-            ARMCI_Get(stats_other, &latency_other, sizeof(latency_other),
-                      i);
+            double *stats_other = stats;
+            shmem_getmem(&latency_other, stats_other, sizeof(latency_other),
+                         i);
             stats[0] += latency_other;
         }
         printf("%20.8lf us\n",
@@ -328,7 +307,7 @@ void run_getget_latency_test(sync_type_t sync)
 
     num_pairs = num_active_nodes / 2;
     origin_recv = recv_buffer;
-    target_send = REMOTE_ADDRESS(send_buffer, partner);
+    target_send = send_buffer;
 
     stats = stats_buffer;
 
@@ -340,8 +319,8 @@ void run_getget_latency_test(sync_type_t sync)
     if (my_node < partner) {
         t1 = MPI_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
-            ARMCI_Get(target_send, origin_recv, sizeof(*target_send),
-                      partner);
+            shmem_getmem(origin_recv, target_send, sizeof(*target_send),
+                         partner);
             do_sync(sync);
             do_sync(sync);
         }
@@ -352,8 +331,8 @@ void run_getget_latency_test(sync_type_t sync)
         t1 = MPI_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
             do_sync(sync);
-            ARMCI_Get(target_send, origin_recv, sizeof(*target_send),
-                      partner);
+            shmem_getmem(origin_recv, target_send, sizeof(*target_send),
+                         partner);
             do_sync(sync);
         }
         t2 = MPI_Wtime();
@@ -361,22 +340,21 @@ void run_getget_latency_test(sync_type_t sync)
         stats[0] = 1000000*(t2-t1)/(LAT_NITER);
     }
 
-    ARMCI_Barrier();
+    shmem_barrier_all();
 
     if (my_node == 0) {
         /* collect stats from other nodes */
         for (i = 1; i < num_active_nodes; i++) {
             double latency_other;
-            double *stats_other = REMOTE_ADDRESS(stats, i);
-            ARMCI_Get(stats_other, &latency_other, sizeof(latency_other),
-                      i);
+            double *stats_other = stats;
+            shmem_getmem(&latency_other, stats_other, sizeof(latency_other),
+                         i);
             stats[0] += latency_other;
         }
         printf("%20.8lf us\n", stats[0]/num_active_nodes);
     }
 }
 
-#if 1
 /********************************************************************
  *                      1-Way Bandwidth Tests
  ********************************************************************/
@@ -393,7 +371,7 @@ void run_put_bw_test()
 
     num_pairs = num_active_nodes / 2;
     origin_send = send_buffer;
-    target_recv = REMOTE_ADDRESS(recv_buffer, partner);
+    target_recv = recv_buffer;
 
     stats = stats_buffer;
 
@@ -411,7 +389,8 @@ void run_put_bw_test()
             size_t msg_size = blksize * (sizeof *origin_send);
             t1 = MPI_Wtime();
             for (i = 0; i < nrep; i++) {
-                ARMCI_Put(origin_send, target_recv, msg_size, partner);
+                shmem_putmem(target_recv, origin_send, msg_size, partner);
+                shmem_fence();
                 if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
@@ -421,15 +400,15 @@ void run_put_bw_test()
             stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
         }
 
-        ARMCI_Barrier();
+        shmem_barrier_all();
 
         if (my_node == 0) {
             /* collect stats from other nodes */
             for (i = 1; i < num_pairs; i++) {
                 double bw_other;
-                double *stats_other = REMOTE_ADDRESS(stats, i);
-                ARMCI_Get(&stats_other[num_stats], &bw_other,
-                          sizeof(bw_other), i);
+                double *stats_other = stats;
+                shmem_getmem(&bw_other, stats_other, sizeof(bw_other),
+                             i);
                 stats[num_stats] += bw_other;
             }
 
@@ -453,7 +432,7 @@ void run_get_bw_test()
 
     num_pairs = num_active_nodes / 2;
     origin_recv = recv_buffer;
-    target_send = REMOTE_ADDRESS(send_buffer, partner);
+    target_send = send_buffer;
 
     stats = stats_buffer;
 
@@ -471,8 +450,7 @@ void run_get_bw_test()
             size_t msg_size = blksize * (sizeof *target_send);
             t1 = MPI_Wtime();
             for (i = 0; i < nrep; i++) {
-                ARMCI_Get(target_send, origin_recv, msg_size,
-                          partner);
+                shmem_getmem(origin_recv, target_send, msg_size, partner);
                 if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
@@ -482,15 +460,14 @@ void run_get_bw_test()
             stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
         }
 
-        ARMCI_Barrier();
+        shmem_barrier_all();
 
         if (my_node == 0) {
             /* collect stats from other nodes */
             for (i = 1; i < num_pairs; i++) {
                 double bw_other;
-                double *stats_other = REMOTE_ADDRESS(stats, i);
-                ARMCI_Get(&stats_other[num_stats], &bw_other,
-                          sizeof(bw_other), i);
+                double *stats_other = stats;
+                shmem_getmem(&bw_other, stats_other, sizeof(bw_other), i);
                 stats[num_stats] += bw_other;
             }
 
@@ -512,12 +489,12 @@ void run_strided_put_bw_test(strided_type_t strided)
     const size_t MAX_COUNT = 32*1024;
     const size_t MAX_BLKSIZE = MAX_MSG_SIZE / (sizeof *origin_send);
     const size_t MAX_STRIDE = MAX_BLKSIZE / MAX_COUNT;
-    size_t stride;
+    ptrdiff_t stride;
     double *stats;
 
     num_pairs = num_active_nodes / 2;
     origin_send = send_buffer;
-    target_recv = REMOTE_ADDRESS(recv_buffer, partner);
+    target_recv = recv_buffer;
 
     stats = stats_buffer;
 
@@ -535,31 +512,27 @@ void run_strided_put_bw_test(strided_type_t strided)
         int nrep = BW_NITER;
 
         if (my_node < partner) {
-            int origin_strides[1], target_strides[1];
-            int count[2];
+            ptrdiff_t origin_stride, target_stride;
             size_t msg_size = MAX_COUNT * (sizeof *origin_send);
 
-            target_strides[0] = sizeof *origin_send;
-            origin_strides[0] = sizeof *origin_send;
+            target_stride = 1;
+            origin_stride = 1;
 
             if (strided == TARGET_STRIDED)
-                target_strides[0] = stride * (sizeof *origin_send);
+                target_stride = stride;
 
             if (strided == ORIGIN_STRIDED)
-                origin_strides[0] = stride * (sizeof *origin_send);
+                origin_stride = stride;
 
             if (strided == BOTH_STRIDED) {
-                target_strides[0] = stride * (sizeof *origin_send);
-                origin_strides[0] = stride * (sizeof *origin_send);
+                target_stride = stride;
+                origin_stride = stride;
             }
-
-            count[0] = sizeof *origin_send;
-            count[1] = MAX_COUNT;
 
             t1 = MPI_Wtime();
             for (i = 0; i < nrep; i++) {
-                ARMCI_PutS(origin_send, origin_strides, target_recv,
-                           target_strides, count, 1, partner);
+                shmem_int_iput(target_recv, origin_send, target_stride,
+                               origin_stride, MAX_COUNT, partner);
                 if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
@@ -569,15 +542,15 @@ void run_strided_put_bw_test(strided_type_t strided)
             stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
         }
 
-        ARMCI_Barrier();
+        shmem_barrier_all();
 
         if (my_node == 0) {
             /* collect stats from other nodes */
             for (i = 1; i < num_pairs; i++) {
                 double bw_other;
-                double *stats_other = REMOTE_ADDRESS(stats, i);
-                ARMCI_Get(&stats_other[num_stats], &bw_other,
-                          sizeof(bw_other), i);
+                double *stats_other = stats;
+                shmem_getmem(&bw_other, stats_other, sizeof(bw_other),
+                             i);
                 stats[num_stats] += bw_other;
             }
 
@@ -599,12 +572,12 @@ void run_strided_get_bw_test(strided_type_t strided)
     const size_t MAX_COUNT = 32*1024;
     const size_t MAX_BLKSIZE = MAX_MSG_SIZE / (sizeof *target_send);
     const size_t MAX_STRIDE = MAX_BLKSIZE / MAX_COUNT;
-    size_t stride;
+    ptrdiff_t stride;
     double *stats;
 
     num_pairs = num_active_nodes / 2;
     origin_recv = recv_buffer;
-    target_send = REMOTE_ADDRESS(send_buffer, partner);
+    target_send = send_buffer;
 
     stats = stats_buffer;
 
@@ -622,31 +595,27 @@ void run_strided_get_bw_test(strided_type_t strided)
         int nrep = BW_NITER;
 
         if (my_node < partner) {
-            int origin_strides[1], target_strides[1];
-            int count[2];
+            ptrdiff_t origin_stride, target_stride;
             size_t msg_size = MAX_COUNT * (sizeof *target_send);
 
-            origin_strides[0] = sizeof *target_send;
-            target_strides[0] = sizeof *target_send;
+            target_stride = 1;
+            origin_stride = 1;
 
             if (strided == TARGET_STRIDED)
-                target_strides[0] = stride * (sizeof *target_send);
+                target_stride = stride;
 
             if (strided == ORIGIN_STRIDED)
-                origin_strides[0] = stride * (sizeof *target_send);
+                origin_stride = stride;
 
             if (strided == BOTH_STRIDED) {
-                target_strides[0] = stride * (sizeof *target_send);
-                origin_strides[0] = stride * (sizeof *target_send);
+                target_stride = stride;
+                origin_stride = stride;
             }
-
-            count[0] = sizeof *target_send;
-            count[1] = MAX_COUNT;
 
             t1 = MPI_Wtime();
             for (i = 0; i < nrep; i++) {
-                ARMCI_GetS(target_send, target_strides, origin_recv,
-                           origin_strides, count, 1, partner);
+                shmem_int_iget(origin_recv, target_send, origin_stride,
+                               target_stride, MAX_COUNT, partner);
                 if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
@@ -656,15 +625,14 @@ void run_strided_get_bw_test(strided_type_t strided)
             stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
         }
 
-        ARMCI_Barrier();
+        shmem_barrier_all();
 
         if (my_node == 0) {
             /* collect stats from other nodes */
             for (i = 1; i < num_pairs; i++) {
                 double bw_other;
-                double *stats_other = REMOTE_ADDRESS(stats, i);
-                ARMCI_Get(&stats_other[num_stats], &bw_other,
-                          sizeof(bw_other), i);
+                double *stats_other = stats;
+                shmem_getmem(&bw_other, stats_other, sizeof(bw_other), i);
                 stats[num_stats] += bw_other;
             }
 
@@ -693,7 +661,7 @@ void run_put_bidir_bw_test()
 
     num_pairs = num_active_nodes / 2;
     origin_send = send_buffer;
-    target_recv = REMOTE_ADDRESS(recv_buffer, partner);
+    target_recv = recv_buffer;
 
     stats = stats_buffer;
 
@@ -710,7 +678,8 @@ void run_put_bidir_bw_test()
 
         t1 = MPI_Wtime();
         for (i = 0; i < nrep; i++) {
-            ARMCI_Put(origin_send, target_recv, msg_size, partner);
+            shmem_putmem(target_recv, origin_send, msg_size, partner);
+            shmem_fence();
             if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
               nrep = i;
             }
@@ -719,15 +688,15 @@ void run_put_bidir_bw_test()
 
         stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
 
-        ARMCI_Barrier();
+        shmem_barrier_all();
 
         if (my_node == 0) {
             /* collect stats from other nodes */
             for (i = 1; i < num_active_nodes; i++) {
                 double bw_other;
-                double *stats_other = REMOTE_ADDRESS(stats, i);
-                ARMCI_Get(&stats_other[num_stats], &bw_other,
-                          sizeof(bw_other), i);
+                double *stats_other = stats;
+                shmem_getmem(&bw_other, stats_other, sizeof(bw_other),
+                             i);
                 stats[num_stats] += bw_other;
             }
 
@@ -751,7 +720,7 @@ void run_get_bidir_bw_test()
 
     num_pairs = num_active_nodes / 2;
     origin_recv = recv_buffer;
-    target_send = REMOTE_ADDRESS(send_buffer, partner);
+    target_send = send_buffer;
 
     stats = stats_buffer;
 
@@ -768,8 +737,7 @@ void run_get_bidir_bw_test()
 
         t1 = MPI_Wtime();
         for (i = 0; i < nrep; i++) {
-            ARMCI_Get(target_send, origin_recv, msg_size,
-                    partner);
+            shmem_getmem(origin_recv, target_send, msg_size, partner);
             if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
                 nrep = i;
             }
@@ -778,15 +746,14 @@ void run_get_bidir_bw_test()
 
         stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
 
-        ARMCI_Barrier();
+        shmem_barrier_all();
 
         if (my_node == 0) {
             /* collect stats from other nodes */
             for (i = 1; i < num_active_nodes; i++) {
                 double bw_other;
-                double *stats_other = REMOTE_ADDRESS(stats, i);
-                ARMCI_Get(&stats_other[num_stats], &bw_other,
-                          sizeof(bw_other), i);
+                double *stats_other = stats;
+                shmem_getmem(&bw_other, stats_other, sizeof(bw_other), i);
                 stats[num_stats] += bw_other;
             }
 
@@ -808,12 +775,12 @@ void run_strided_put_bidir_bw_test(strided_type_t strided)
     const size_t MAX_COUNT = 32*1024;
     const size_t MAX_BLKSIZE = MAX_MSG_SIZE / (sizeof *origin_send);
     const size_t MAX_STRIDE = MAX_BLKSIZE / MAX_COUNT;
-    size_t stride;
+    ptrdiff_t stride;
     double *stats;
 
     num_pairs = num_active_nodes / 2;
     origin_send = send_buffer;
-    target_recv = REMOTE_ADDRESS(recv_buffer, partner);
+    target_recv = recv_buffer;
 
     stats = stats_buffer;
 
@@ -828,32 +795,28 @@ void run_strided_put_bidir_bw_test(strided_type_t strided)
     num_stats = 0;
     for (stride = 1; stride <= MAX_STRIDE; stride *= 2) {
         int i;
-        int origin_strides[1], target_strides[1];
-        int count[2];
+        ptrdiff_t origin_stride, target_stride;
         int nrep = BW_NITER;
         size_t msg_size = MAX_COUNT * (sizeof *origin_send);
 
-        target_strides[0] = sizeof *origin_send;
-        origin_strides[0] = sizeof *origin_send;
+        target_stride = 1;
+        origin_stride = 1;
 
         if (strided == TARGET_STRIDED)
-            target_strides[0] = stride * (sizeof *origin_send);
+            target_stride = stride;
 
         if (strided == ORIGIN_STRIDED)
-            origin_strides[0] = stride * (sizeof *origin_send);
+            origin_stride = stride;
 
         if (strided == BOTH_STRIDED) {
-            target_strides[0] = stride * (sizeof *origin_send);
-            origin_strides[0] = stride * (sizeof *origin_send);
+            target_stride = stride;
+            origin_stride = stride;
         }
-
-        count[0] = sizeof *origin_send;
-        count[1] = MAX_COUNT;
 
         t1 = MPI_Wtime();
         for (i = 0; i < nrep; i++) {
-            ARMCI_PutS(origin_send, origin_strides, target_recv,
-                    target_strides, count, 1, partner);
+            shmem_int_iput(target_recv, origin_send, target_stride,
+                    origin_stride, MAX_COUNT, partner);
             if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
               nrep = i;
             }
@@ -862,15 +825,14 @@ void run_strided_put_bidir_bw_test(strided_type_t strided)
 
         stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
 
-        ARMCI_Barrier();
+        shmem_barrier_all();
 
         if (my_node == 0) {
             /* collect stats from other nodes */
             for (i = 1; i < num_active_nodes; i++) {
                 double bw_other;
-                double *stats_other = REMOTE_ADDRESS(stats, i);
-                ARMCI_Get(&stats_other[num_stats], &bw_other,
-                          sizeof(bw_other), i);
+                double *stats_other = stats;
+                shmem_getmem(&bw_other, stats_other, sizeof(bw_other), i);
                 stats[num_stats] += bw_other;
             }
 
@@ -892,12 +854,12 @@ void run_strided_get_bidir_bw_test(strided_type_t strided)
     const size_t MAX_COUNT = 32*1024;
     const size_t MAX_BLKSIZE = MAX_MSG_SIZE / (sizeof *target_send);
     const size_t MAX_STRIDE = MAX_BLKSIZE / MAX_COUNT;
-    size_t stride;
+    ptrdiff_t stride;
     double *stats;
 
     num_pairs = num_active_nodes / 2;
     origin_recv = recv_buffer;
-    target_send = REMOTE_ADDRESS(send_buffer, partner);
+    target_send = send_buffer;
 
     stats = stats_buffer;
 
@@ -912,32 +874,28 @@ void run_strided_get_bidir_bw_test(strided_type_t strided)
     num_stats = 0;
     for (stride = 1; stride <= MAX_STRIDE; stride *= 2) {
         int i;
-        int origin_strides[1], target_strides[1];
-        int count[2];
         int nrep = BW_NITER;
+        ptrdiff_t origin_stride, target_stride;
         size_t msg_size = MAX_COUNT * (sizeof *target_send);
 
-        origin_strides[0] = sizeof *target_send;
-        target_strides[0] = sizeof *target_send;
+        target_stride = 1;
+        origin_stride = 1;
 
         if (strided == TARGET_STRIDED)
-            target_strides[0] = stride * (sizeof *target_send);
+            target_stride = stride;
 
         if (strided == ORIGIN_STRIDED)
-            origin_strides[0] = stride * (sizeof *target_send);
+            origin_stride = stride;
 
         if (strided == BOTH_STRIDED) {
-            target_strides[0] = stride * (sizeof *target_send);
-            origin_strides[0] = stride * (sizeof *target_send);
+            target_stride = stride;
+            origin_stride = stride;
         }
-
-        count[0] = sizeof *target_send;
-        count[1] = MAX_COUNT;
 
         t1 = MPI_Wtime();
         for (i = 0; i < nrep; i++) {
-            ARMCI_GetS(target_send, target_strides, origin_recv,
-                    origin_strides, count, 1, partner);
+            shmem_int_iget(origin_recv, target_send, origin_stride,
+                           target_stride, MAX_COUNT, partner);
             if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
               nrep = i;
             }
@@ -946,15 +904,14 @@ void run_strided_get_bidir_bw_test(strided_type_t strided)
 
         stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
 
-        ARMCI_Barrier();
+        shmem_barrier_all();
 
         if (my_node == 0) {
             /* collect stats from other nodes */
             for (i = 1; i < num_active_nodes; i++) {
                 double bw_other;
-                double *stats_other = REMOTE_ADDRESS(stats, i);
-                ARMCI_Get(&stats_other[num_stats], &bw_other,
-                          sizeof(bw_other), i);
+                double *stats_other = stats;
+                shmem_getmem(&bw_other, stats_other, sizeof(bw_other), i);
                 stats[num_stats] += bw_other;
             }
 
@@ -966,5 +923,3 @@ void run_strided_get_bidir_bw_test(strided_type_t strided)
         num_stats++;
     }
 }
-
-#endif
