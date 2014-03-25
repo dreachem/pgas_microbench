@@ -533,6 +533,7 @@ void run_strided_put_bw_test(strided_type_t strided)
             for (i = 0; i < nrep; i++) {
                 shmem_int_iput(target_recv, origin_send, target_stride,
                                origin_stride, MAX_COUNT, partner);
+                shmem_fence();
                 if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
@@ -817,6 +818,7 @@ void run_strided_put_bidir_bw_test(strided_type_t strided)
         for (i = 0; i < nrep; i++) {
             shmem_int_iput(target_recv, origin_send, target_stride,
                     origin_stride, MAX_COUNT, partner);
+            shmem_fence();
             if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
               nrep = i;
             }
