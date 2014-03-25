@@ -349,7 +349,7 @@ module caf_microbenchmarks
         num_pairs = num_active_images / 2
 
         if (ti == 1) then
-            write (*,'(//,"1-Way Random Put Bandwith")')
+            write (*,'(//,"Random Put Bandwith")')
             write (*,'(A20, A20, A20)') "blksize", "nrep", "bandwidth"
         end if
 
@@ -413,7 +413,7 @@ module caf_microbenchmarks
         num_pairs = num_active_images / 2
 
         if (ti == 1) then
-            write (*,'(//,"1-Way Random Get Bandwith")')
+            write (*,'(//,"Random Get Bandwith")')
             write (*,'(A20, A20, A20)') "blksize", "nrep", "bandwidth"
         end if
 
@@ -964,7 +964,7 @@ module caf_microbenchmarks
             strided_label(2) = "Origin Strided"
             strided_label(3) = "Both Strided"
 
-            write (*,'(//,"2-Way ",A0," Random Put Bandwith")') &
+            write (*,'(//,A0," Random Put Bandwith")') &
                 strided_label(strided)
             write (*,'(A20, A20, A20, A20)') "count", "stride", "nrep", "bandwidth"
         end if
@@ -1075,7 +1075,7 @@ module caf_microbenchmarks
             strided_label(2) = "Origin Strided"
             strided_label(3) = "Both Strided"
 
-            write (*,'(//,"2-Way ",A0, " Random Get Bandwith ")') &
+            write (*,'(//,A0, " Random Get Bandwith ")') &
                 strided_label(strided)
             write (*,'(A20, A20, A20, A20)') "count", "stride", "nrep", "bandwidth"
         end if
