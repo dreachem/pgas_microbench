@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include <mpi.h>
 #include "gasnet.h"
 #include "gasnet_tools.h"
@@ -31,6 +32,7 @@ typedef enum {
 
 void print_sendrecv_address();
 void p2psync_test();
+void reduction_test();
 
 void handler_sync_notify(gasnet_token_t token, gasnet_handlerarg_t partner);
 void do_sync_notify(int partner);
@@ -52,12 +54,14 @@ void run_get_bidir_bw_test(int do_bulk);
 void run_strided_put_bidir_bw_test(strided_type_t strided);
 void run_strided_get_bidir_bw_test(strided_type_t strided);
 
+void run_reduce_test(int separate_target);
 
 const int TIMEOUT = 5;
 const size_t SEGMENT_SIZE = 30*1024*1024;
 const size_t MAX_MSG_SIZE = 4*1024*1024;
 const long long LAT_NITER = 10000;
 const long long BW_NITER = 10000;
+const long long RED_NITER = 100;
 
 const int NUM_STATS = 32;
 
@@ -83,16 +87,53 @@ static gasnet_handlerentry_t handlers[] = {
 
 static const int nhandlers = sizeof(handlers) / sizeof(handlers[0]);
 
+void int_reduce_fn(void *results, size_t result_count,
+        const void *left_operands, size_t left_count,
+        const void *right_operands,
+        size_t elem_size, int flags, int arg) {
+    int i;
+    int *res = (int*) results;
+    int *src1 = (int*) left_operands;
+    int *src2 = (int*) right_operands;
+    assert(elem_size == sizeof(int));
+    assert(result_count==left_count);
+    switch(arg) {
+        case 0:
+            for(i=0; i<result_count; i++) {
+                res[i] = src1[i] + src2[i];
+            } break;
+        case 1:
+            for(i=0; i<result_count; i++) {
+                int x1 = src1[i];
+                int x2 = src2[i];
+                res[i] = (x1 > x2) ? x1 : x2;
+            } break;
+        case 2:
+            for(i=0; i<result_count; i++) {
+                int x1 = src1[i];
+                int x2 = src2[i];
+                res[i] = (x1 < x2) ? x1 : x2;
+            } break;
+        default:
+            fprintf(stderr, "NOT SUPPORTED reduce op %d\n", arg);
+            exit (1);
+    }
+
+}
+
 
 int main(int argc, char **argv)
 {
     int ret;
+    int i;
     double t1, t2, t3;
+    gasnet_coll_fn_entry_t fntable[1];
 
     /* start up gasnet */
     gasnet_init(&argc, &argv);
     my_node   = gasnet_mynode();
     num_nodes = gasnet_nodes();
+
 
     if (num_nodes < 2) {
         fprintf(stderr, "not enough nodes running\n");
@@ -115,6 +156,11 @@ int main(int argc, char **argv)
         fprintf(stderr, "error in gasnet_attach\n");
         gasnet_exit(1);
     }
+
+    fntable[0].fnptr = int_reduce_fn;
+    fntable[0].flags = 0;
+    gasnet_coll_init(NULL, my_node, fntable, 1, 0);
+
 
     /* get segment info */
     seginfo = malloc( sizeof(*seginfo) * num_nodes);
@@ -167,6 +213,9 @@ int main(int argc, char **argv)
     run_strided_get_bidir_bw_test(ORIGIN_STRIDED);
     run_strided_get_bidir_bw_test(BOTH_STRIDED);
 
+    run_reduce_test(0);
+    run_reduce_test(1);
+
     gasnet_exit(0);
 }
 
@@ -205,6 +254,34 @@ void p2psync_test()
         printf("%d sending sync to %d\n", my_node, partner);
         do_sync_notify(partner);
     }
+}
+
+void reduction_test()
+{
+    int *src, *target;
+    int flags = GASNET_COLL_IN_NOSYNC | GASNET_COLL_OUT_MYSYNC |
+        GASNET_COLL_SRC_IN_SEGMENT | GASNET_COLL_DST_IN_SEGMENT;
+
+    src = send_buffer;
+    target = recv_buffer;
+
+    src[0] = my_node + 1;
+    target[0] = 0;
+
+    gasnet_barrier_notify(0,0);
+    gasnet_barrier_wait(0,0);
+
+    gasnet_coll_reduce(GASNET_TEAM_ALL, 0, target, src, 0, 0,
+            sizeof(*src), 1, 0, 0, flags);
+    gasnet_coll_broadcast(GASNET_TEAM_ALL, target, 0, target, sizeof(*src),
+                          flags|GASNET_COLL_LOCAL);
+
+    /*
+    gasnet_barrier_notify(0,0);
+    gasnet_barrier_wait(0,0);
+    */
+
+    printf("%d target = %d, src = %d\n", my_node, target[0], src[0]);
 }
 #endif
 
@@ -1056,4 +1133,77 @@ void run_strided_get_bidir_bw_test(strided_type_t strided)
         }
         num_stats++;
     }
+}
+
+/********************************************************************
+ *                      REDUCTION TESTS
+ ********************************************************************/
+
+void run_reduce_test(int separate_target)
+{
+    int *origin_send, *target_recv;
+    double t1, t2;
+    int num_stats;
+    int num_pairs;
+    const size_t MAX_BLKSIZE = MAX_MSG_SIZE / (sizeof *origin_send);
+    size_t blksize;
+    double *stats;
+
+    origin_send = send_buffer;
+    if (separate_target) {
+        target_recv = recv_buffer;
+    } else {
+        target_recv = origin_send;
+    }
+
+    stats = stats_buffer;
+
+    if (my_node == 0) {
+        printf("\n\nReduction (src %s target): \n",
+                separate_target ? "!=" : "==");
+        printf("%20s %20s %20s\n", "blksize", "nrep", "latency");
+    }
+    num_stats = 0;
+    for (blksize = 1; blksize <= MAX_BLKSIZE; blksize *= 2) {
+        int flags = GASNET_COLL_IN_NOSYNC | GASNET_COLL_OUT_MYSYNC |
+                GASNET_COLL_SRC_IN_SEGMENT | GASNET_COLL_DST_IN_SEGMENT |
+                GASNET_COLL_LOCAL;
+        int i;
+        int nrep = RED_NITER;
+        size_t msg_size = blksize * (sizeof *origin_send);
+
+        t1 = MPI_Wtime();
+        for (i = 0; i < nrep; i++) {
+            gasnet_coll_reduce(GASNET_TEAM_ALL, 0, target_recv, origin_send, 0, 0,
+                          sizeof(*origin_send), blksize, 0, 0, flags);
+            gasnet_coll_broadcast(GASNET_TEAM_ALL, target_recv, 0, target_recv,
+                          sizeof(*origin_send)*blksize, flags);
+            if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+              nrep = i;
+            }
+        }
+        t2 = MPI_Wtime();
+
+        stats[num_stats] = 1000000*(t2-t1)/(RED_NITER);
+
+        gasnet_barrier_notify(0,0);
+        gasnet_barrier_wait(0,0);
+
+        if (my_node == 0) {
+            /* collect stats from other nodes */
+            for (i = 1; i < num_active_nodes; i++) {
+                double lat_other;
+                double *stats_other = REMOTE_ADDRESS(stats, i);
+                gasnet_get(&lat_other, i, &stats_other[num_stats],
+                           sizeof(lat_other));
+                stats[num_stats] += lat_other;
+            }
+
+            printf("%20ld %20ld %17.3f us\n",
+                    (long)blksize, (long)nrep,
+                    stats[num_stats]/num_active_nodes);
+        }
+        num_stats++;
+    }
+
 }
