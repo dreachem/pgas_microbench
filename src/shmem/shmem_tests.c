@@ -45,12 +45,15 @@ void run_get_bidir_bw_test();
 void run_strided_put_bidir_bw_test(strided_type_t strided);
 void run_strided_get_bidir_bw_test(strided_type_t strided);
 
+void run_reduce_test(int separate_target);
+
 
 const int TIMEOUT = 5;
 const size_t SEGMENT_SIZE = 30*1024*1024;
 const size_t MAX_MSG_SIZE = 4*1024*1024;
 const long long LAT_NITER = 10000;
 const long long BW_NITER = 10000;
+const long long RED_NITER = 100;
 
 const int NUM_STATS = 32;
 
@@ -115,6 +118,8 @@ int main(int argc, char **argv)
     run_strided_get_bidir_bw_test(ORIGIN_STRIDED);
     run_strided_get_bidir_bw_test(BOTH_STRIDED);
 
+    run_reduce_test(0);
+    run_reduce_test(1);
 }
 
 #ifdef _DEBUG
@@ -924,4 +929,88 @@ void run_strided_get_bidir_bw_test(strided_type_t strided)
         }
         num_stats++;
     }
+}
+
+/********************************************************************
+ *                      REDUCTION TESTS
+ ********************************************************************/
+
+void run_reduce_test(int separate_target)
+{
+    int *origin_send, *target_recv;
+    int *pWrk;
+    long *pSync;
+    int pWrk_size;
+    double t1, t2;
+    int num_stats;
+    const size_t MAX_BLKSIZE = MAX_MSG_SIZE / (sizeof *origin_send);
+    size_t blksize;
+    double *stats;
+    int i;
+
+    pSync = shmalloc(_SHMEM_REDUCE_SYNC_SIZE * sizeof (*pSync));
+    for (i = 0; i < _SHMEM_REDUCE_SYNC_SIZE; i++) {
+        pSync[i] = _SHMEM_SYNC_VALUE;
+    }
+
+    origin_send = send_buffer;
+    if (separate_target) {
+        target_recv = recv_buffer;
+    } else {
+        target_recv = origin_send;
+    }
+
+    stats = stats_buffer;
+
+    if (my_node == 0) {
+        printf("\n\nReduction (src %s target): \n",
+                separate_target ? "!=" : "==");
+        printf("%20s %20s %20s\n", "blksize", "nrep", "latency");
+    }
+    num_stats = 0;
+    for (blksize = 1; blksize <= MAX_BLKSIZE; blksize *= 2) {
+        int i;
+        int nrep = RED_NITER;
+        size_t msg_size = blksize * (sizeof *origin_send);
+        int x1, x2;
+
+        x1 = blksize/2+1;
+        x2 = _SHMEM_REDUCE_MIN_WRKDATA_SIZE;
+        pWrk_size = (x1 > x2) ? x1 : x2;
+        pWrk = shmalloc(pWrk_size * sizeof(*pWrk));
+
+        t1 = MPI_Wtime();
+        for (i = 0; i < nrep; i++) {
+            shmem_int_sum_to_all(target_recv, origin_send, blksize,
+                     0, 0, num_active_nodes, pWrk, pSync);
+            shmem_quiet();
+            if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+              nrep = i;
+            }
+        }
+        t2 = MPI_Wtime();
+
+        shfree(pWrk);
+        stats[num_stats] = 1000000*(t2-t1)/(RED_NITER);
+
+        shmem_barrier_all();
+
+        if (my_node == 0) {
+            /* collect stats from other nodes */
+            for (i = 1; i < num_active_nodes; i++) {
+                double lat_other;
+                double *stats_other = stats;
+                shmem_getmem(&lat_other, stats_other, sizeof(lat_other),
+                             i);
+                stats[num_stats] += lat_other;
+            }
+
+            printf("%20ld %20ld %17.3f us\n",
+                    (long)blksize, (long)nrep,
+                    stats[num_stats]/num_active_nodes);
+        }
+        num_stats++;
+    }
+
+    shfree(pSync);
 }

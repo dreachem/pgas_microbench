@@ -90,3 +90,21 @@ Random Get Bandwidth Test:
 GET message of size M from random address at random target N times.
 
 Bandwidth = M*N / (t2 - t1)
+
+-----------------------------------------------
+
+Reduction Test:
+
+- Reduction message of size M to non-overlapping target, N times
+
+- Reduction message of size M to same src buffer, N times
+
+-----------------------------------------------
+
+Reduction Test:
+
+- Reduction message of size M to non-overlapping target, N times, for subset
+  of PEs
+
+
+- Reduction message of size M to same src buffer, N times, for subset of PEs.
