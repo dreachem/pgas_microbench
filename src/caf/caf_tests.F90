@@ -20,6 +20,7 @@ module caf_microbenchmarks
     integer, parameter :: BUFFER_SIZE = 1024*1024
     integer, parameter :: LAT_NITER = 10000
     integer, parameter :: BW_NITER = 1000
+    integer, parameter :: RED_NITER = 100
 
     integer, parameter :: TIMEOUT = 5
 
@@ -1146,6 +1147,71 @@ module caf_microbenchmarks
           stride = stride * 2
         end do
     end subroutine run_rand_strided_get_bw_test
+
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    !                   REDUCTION TESTS
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    subroutine run_reduce_test(separate_target)
+        implicit none
+        logical :: separate_target
+
+        double precision :: t1, t2
+        integer :: ti, ni, nrep
+        integer :: num_stats
+        integer :: blksize
+        integer :: i
+
+        ti = this_image()
+        ni = num_images()
+
+        if (ti == 1) then
+            if (separate_target) then
+                write (*,'(//,"Reduction: (src != target)")')
+            else
+                write (*,'(//,"Reduction: (src == target)")')
+            end if
+            write (*,'(A20, A20, A20)') "blksize", "nrep", "latency"
+        end if
+
+        num_stats = 1
+        blksize = 1
+        do while (blksize <= BUFFER_SIZE)
+          nrep = RED_NITER
+
+          t1 = MPI_WTIME()
+          do i = 1, nrep
+            !recv_buffer(1:blksize)[partner] = send_buffer(1:blksize)
+            if (separate_target) then
+                call co_sum(send_buffer(1:blksize), recv_buffer(1:blksize));
+            else
+                call co_sum(send_buffer(1:blksize), send_buffer(1:blksize));
+            end if
+            if (mod(i,10) == 0 .and. (MPI_WTIME()-t1) > TIMEOUT) then
+              nrep = i
+              exit
+            end if
+          end do
+          t2 = MPI_WTIME()
+
+          stats_buffer(num_stats) = 1000000*(t2-t1)/(RED_NITER)
+
+          sync all
+
+          if (ti == 1) then
+              do i = 2, num_images()
+                  stats_buffer(num_stats) = stats_buffer(num_stats) + &
+                                            stats_buffer(num_stats)[i]
+              end do
+              write (*, '(I20,I20,F17.3, " us")') &
+                     blksize, nrep, stats_buffer(num_stats)/num_images()
+          end if
+
+          num_stats = num_stats + 1
+          blksize = blksize * 2
+        end do
+
+    end subroutine run_reduce_test
 end module caf_microbenchmarks
 
 program main
@@ -1162,40 +1228,43 @@ program main
 
     allocate ( stats_buffer(NUM_STATS)[*] )
 
-    call run_putget_latency_test()
-    call run_putput_latency_test(BARRIER)
-    call run_putput_latency_test(P2P)
-    call run_getget_latency_test(BARRIER)
-    call run_getget_latency_test(P2P)
+!    call run_putget_latency_test()
+!    call run_putput_latency_test(BARRIER)
+!    call run_putput_latency_test(P2P)
+!    call run_getget_latency_test(BARRIER)
+!    call run_getget_latency_test(P2P)
+!
+!    call run_put_bw_test()
+!    call run_get_bw_test()
+!    call run_put_bw_bidir_test()
+!    call run_get_bw_bidir_test()
+!    call run_rand_put_bw_test()
+!    call run_rand_get_bw_test()
+!
+!    call run_strided_put_bw_test(TARGET_STRIDED)
+!    call run_strided_put_bw_test(ORIGIN_STRIDED)
+!    call run_strided_put_bw_test(BOTH_STRIDED)
+!
+!    call run_strided_get_bw_test(TARGET_STRIDED)
+!    call run_strided_get_bw_test(ORIGIN_STRIDED)
+!    call run_strided_get_bw_test(BOTH_STRIDED)
+!
+!    call run_strided_put_bidir_bw_test(TARGET_STRIDED)
+!    call run_strided_put_bidir_bw_test(ORIGIN_STRIDED)
+!    call run_strided_put_bidir_bw_test(BOTH_STRIDED)
+!
+!    call run_strided_get_bidir_bw_test(TARGET_STRIDED)
+!    call run_strided_get_bidir_bw_test(ORIGIN_STRIDED)
+!    call run_strided_get_bidir_bw_test(BOTH_STRIDED)
+!
+!    call run_rand_strided_put_bw_test(TARGET_STRIDED)
+!    call run_rand_strided_put_bw_test(ORIGIN_STRIDED)
+!    call run_rand_strided_put_bw_test(BOTH_STRIDED)
+!
+!    call run_rand_strided_get_bw_test(TARGET_STRIDED)
+!    call run_rand_strided_get_bw_test(ORIGIN_STRIDED)
+!    call run_rand_strided_get_bw_test(BOTH_STRIDED)
 
-    call run_put_bw_test()
-    call run_get_bw_test()
-    call run_put_bw_bidir_test()
-    call run_get_bw_bidir_test()
-    call run_rand_put_bw_test()
-    call run_rand_get_bw_test()
-
-    call run_strided_put_bw_test(TARGET_STRIDED)
-    call run_strided_put_bw_test(ORIGIN_STRIDED)
-    call run_strided_put_bw_test(BOTH_STRIDED)
-
-    call run_strided_get_bw_test(TARGET_STRIDED)
-    call run_strided_get_bw_test(ORIGIN_STRIDED)
-    call run_strided_get_bw_test(BOTH_STRIDED)
-
-    call run_strided_put_bidir_bw_test(TARGET_STRIDED)
-    call run_strided_put_bidir_bw_test(ORIGIN_STRIDED)
-    call run_strided_put_bidir_bw_test(BOTH_STRIDED)
-
-    call run_strided_get_bidir_bw_test(TARGET_STRIDED)
-    call run_strided_get_bidir_bw_test(ORIGIN_STRIDED)
-    call run_strided_get_bidir_bw_test(BOTH_STRIDED)
-
-    call run_rand_strided_put_bw_test(TARGET_STRIDED)
-    call run_rand_strided_put_bw_test(ORIGIN_STRIDED)
-    call run_rand_strided_put_bw_test(BOTH_STRIDED)
-
-    call run_rand_strided_get_bw_test(TARGET_STRIDED)
-    call run_rand_strided_get_bw_test(ORIGIN_STRIDED)
-    call run_rand_strided_get_bw_test(BOTH_STRIDED)
+    call run_reduce_test(.false.)
+    call run_reduce_test(.true.)
 end program
