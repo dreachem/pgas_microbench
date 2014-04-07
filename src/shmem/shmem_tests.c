@@ -93,7 +93,7 @@ int main(int argc, char **argv)
 
     /* run tests */
 
-    /*
+
     run_putget_latency_test();
     run_putput_latency_test(BARRIER);
     run_putput_latency_test(P2P);
@@ -118,7 +118,7 @@ int main(int argc, char **argv)
     run_strided_get_bidir_bw_test(TARGET_STRIDED);
     run_strided_get_bidir_bw_test(ORIGIN_STRIDED);
     run_strided_get_bidir_bw_test(BOTH_STRIDED);
-    */
+
 
     run_reduce_test(0);
     run_reduce_test(1);
@@ -986,15 +986,6 @@ void run_reduce_test(int separate_target)
             shmem_int_sum_to_all(target_recv, origin_send, blksize,
                      0, 0, num_active_nodes, pWrk, pSync);
             shmem_quiet();
-            /*
-            if (separate_target) {
-                MPI_Allreduce(origin_send, target_recv, blksize, MPI_INT, MPI_SUM,
-                              MPI_COMM_WORLD);
-            } else {
-                MPI_Allreduce(MPI_IN_PLACE, target_recv, blksize, MPI_INT, MPI_SUM,
-                              MPI_COMM_WORLD);
-            }
-            */
             //shmem_barrier_all();
             if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
               nrep = i;
