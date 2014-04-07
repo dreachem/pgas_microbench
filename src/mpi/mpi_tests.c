@@ -82,11 +82,13 @@ int main(int argc, char **argv)
 
     run_latency_test();
 
+    /*
     run_bw_test();
     run_bidir_bw_test();
 
     run_reduce_test(0);
     run_reduce_test(1);
+    */
 
     MPI_Finalize();
 }
@@ -127,26 +129,22 @@ void run_latency_test()
 
         stats[0] = 1000000*(t2-t1)/(LAT_NITER);
     } else {
-        t1 = MPI_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
             MPI_Recv(origin_recv, 1, MPI_INT, partner, 0, MPI_COMM_WORLD, &status);
             MPI_Send(origin_send, 1, MPI_INT, partner, 0, MPI_COMM_WORLD);
         }
-        t2 = MPI_Wtime();
-
-        stats[0] = 1000000*(t2-t1)/(LAT_NITER);
     }
 
 
     if (my_node == 0) {
         /* collect stats from other active nodes */
-        for (i = 1; i < num_active_nodes; i++) {
+        for (i = 1; i < num_pairs; i++) {
             double latency_other;
             MPI_Recv(&latency_other, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, &status);
             stats[0] += latency_other;
         }
         printf("%20.8lf us\n", stats[0]/num_pairs);
-    } else {
+    } else if (my_node < num_pairs) {
         MPI_Send(stats, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
     }
 }
