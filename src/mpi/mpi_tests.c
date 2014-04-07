@@ -40,7 +40,7 @@ const int TIMEOUT = 5;
 const size_t SEGMENT_SIZE = 30*1024*1024;
 const size_t MAX_MSG_SIZE = 4*1024*1024;
 const long long LAT_NITER = 10000;
-const long long BW_NITER = 10000;
+const long long BW_NITER = 1000;
 const long long RED_NITER = 100;
 
 const int NUM_STATS = 32;
@@ -208,14 +208,14 @@ void run_bw_test()
             for (i = 1; i < num_pairs; i++) {
                 double bw_other;
                 MPI_Recv(&bw_other, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, &status);
-                stats[0] += bw_other;
+                stats[num_stats] += bw_other;
             }
 
             printf("%20ld %20ld %17.3f MB/s\n",
                     (long)blksize, (long)nrep,
                     stats[num_stats]/num_pairs);
         } else if (my_node < num_pairs) {
-            MPI_Send(stats, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+            MPI_Send(&stats[num_stats], 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
         }
         num_stats++;
     }
@@ -288,14 +288,14 @@ void run_bidir_bw_test()
             for (i = 1; i < num_active_nodes; i++) {
                 double bw_other;
                 MPI_Recv(&bw_other, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, &status);
-                stats[0] += bw_other;
+                stats[num_stats] += bw_other;
             }
 
             printf("%20ld %20ld %17.3f MB/s\n",
                     (long)blksize, (long)nrep,
                     stats[num_stats]/num_active_nodes);
         } else if (my_node < num_active_nodes) {
-            MPI_Send(stats, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+            MPI_Send(&stats[num_stats], 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
         }
         num_stats++;
     }
@@ -362,14 +362,14 @@ void run_reduce_test(int separate_target)
             for (i = 1; i < num_active_nodes; i++) {
                 double lat_other;
                 MPI_Recv(&lat_other, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, &status);
-                stats[0] += lat_other;
+                stats[num_stats] += lat_other;
             }
 
             printf("%20ld %20ld %17.3f us\n",
                     (long)blksize, (long)nrep,
                     stats[num_stats]/num_active_nodes);
         } else if (my_node < num_active_nodes) {
-            MPI_Send(stats, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+            MPI_Send(&stats[num_stats], 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
         }
         num_stats++;
     }
