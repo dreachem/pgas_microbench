@@ -1,5 +1,5 @@
 /*
- * Microbenchmarks for SHMEM
+ * Microbenchmarks for MPI
  *
  * (C) HPCTools Group, University of Houston
  *
