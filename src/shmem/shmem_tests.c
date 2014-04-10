@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <mpi.h>
+#include <sys/time.h>
 #include <shmem.h>
 
 
@@ -49,7 +49,6 @@ void run_reduce_test(int separate_target);
 
 
 const int TIMEOUT = 5;
-const size_t SEGMENT_SIZE = 30*1024*1024;
 const size_t MAX_MSG_SIZE = 4*1024*1024;
 const long long LAT_NITER = 10000;
 const long long BW_NITER = 10000;
@@ -93,7 +92,6 @@ int main(int argc, char **argv)
 
     /* run tests */
 
-
     run_putget_latency_test();
     run_putput_latency_test(BARRIER);
     run_putput_latency_test(P2P);
@@ -118,7 +116,6 @@ int main(int argc, char **argv)
     run_strided_get_bidir_bw_test(TARGET_STRIDED);
     run_strided_get_bidir_bw_test(ORIGIN_STRIDED);
     run_strided_get_bidir_bw_test(BOTH_STRIDED);
-
 
     run_reduce_test(0);
     run_reduce_test(1);
@@ -195,6 +192,18 @@ void do_sync_wait(int partner)
  *                      LATENCY TESTS
  ********************************************************************/
 
+double get_Wtime()
+{
+    double t;
+    struct timeval tv;
+
+    gettimeofday(&tv, NULL);
+
+    t = (tv.tv_sec*1000000LL + tv.tv_usec)/1000000.0;
+
+    return t;
+}
+
 void run_putget_latency_test()
 {
     int *origin_send, *target_recv;
@@ -217,7 +226,7 @@ void run_putget_latency_test()
     }
 
     if (my_node < partner) {
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
             shmem_putmem(target_recv, origin_send, sizeof(*target_recv),
                          partner);
@@ -225,7 +234,7 @@ void run_putget_latency_test()
             shmem_getmem(origin_recv, target_send, sizeof(*target_send),
                          partner);
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         stats[0] = 1000000*(t2-t1)/(LAT_NITER);
     }
@@ -265,25 +274,25 @@ void run_putput_latency_test(sync_type_t sync)
     }
 
     if (my_node < partner) {
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
             shmem_putmem(target_recv, origin_send, sizeof(*target_recv),
                          partner);
             do_sync(sync);
             do_sync(sync);
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         stats[0] = 1000000*(t2-t1)/(LAT_NITER);
     } else if (my_node < num_active_nodes) {
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
             do_sync(sync);
             shmem_putmem(target_recv, origin_send, sizeof(*target_recv),
                          partner);
             do_sync(sync);
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         stats[0] = 1000000*(t2-t1)/(LAT_NITER);
     }
@@ -324,25 +333,25 @@ void run_getget_latency_test(sync_type_t sync)
     }
 
     if (my_node < partner) {
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
             shmem_getmem(origin_recv, target_send, sizeof(*target_send),
                          partner);
             do_sync(sync);
             do_sync(sync);
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         stats[0] = 1000000*(t2-t1)/(LAT_NITER);
     } else if (my_node < num_active_nodes) {
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
             do_sync(sync);
             shmem_getmem(origin_recv, target_send, sizeof(*target_send),
                          partner);
             do_sync(sync);
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         stats[0] = 1000000*(t2-t1)/(LAT_NITER);
     }
@@ -394,15 +403,15 @@ void run_put_bw_test()
 
         if (my_node < partner) {
             size_t msg_size = blksize * (sizeof *origin_send);
-            t1 = MPI_Wtime();
+            t1 = get_Wtime();
             for (i = 0; i < nrep; i++) {
                 shmem_putmem(target_recv, origin_send, msg_size, partner);
                 shmem_fence();
-                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
             }
-            t2 = MPI_Wtime();
+            t2 = get_Wtime();
 
             stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
         }
@@ -455,14 +464,14 @@ void run_get_bw_test()
 
         if (my_node < partner) {
             size_t msg_size = blksize * (sizeof *target_send);
-            t1 = MPI_Wtime();
+            t1 = get_Wtime();
             for (i = 0; i < nrep; i++) {
                 shmem_getmem(origin_recv, target_send, msg_size, partner);
-                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
             }
-            t2 = MPI_Wtime();
+            t2 = get_Wtime();
 
             stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
         }
@@ -536,16 +545,16 @@ void run_strided_put_bw_test(strided_type_t strided)
                 origin_stride = stride;
             }
 
-            t1 = MPI_Wtime();
+            t1 = get_Wtime();
             for (i = 0; i < nrep; i++) {
                 shmem_int_iput(target_recv, origin_send, target_stride,
                                origin_stride, MAX_COUNT, partner);
                 shmem_fence();
-                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
             }
-            t2 = MPI_Wtime();
+            t2 = get_Wtime();
 
             stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
         }
@@ -620,15 +629,15 @@ void run_strided_get_bw_test(strided_type_t strided)
                 origin_stride = stride;
             }
 
-            t1 = MPI_Wtime();
+            t1 = get_Wtime();
             for (i = 0; i < nrep; i++) {
                 shmem_int_iget(origin_recv, target_send, origin_stride,
                                target_stride, MAX_COUNT, partner);
-                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
             }
-            t2 = MPI_Wtime();
+            t2 = get_Wtime();
 
             stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
         }
@@ -684,15 +693,15 @@ void run_put_bidir_bw_test()
         int nrep = BW_NITER;
         size_t msg_size = blksize * (sizeof *origin_send);
 
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         for (i = 0; i < nrep; i++) {
             shmem_putmem(target_recv, origin_send, msg_size, partner);
             shmem_fence();
-            if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+            if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
               nrep = i;
             }
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
 
@@ -743,14 +752,14 @@ void run_get_bidir_bw_test()
         int nrep = BW_NITER;
         size_t msg_size = blksize * (sizeof *target_send);
 
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         for (i = 0; i < nrep; i++) {
             shmem_getmem(origin_recv, target_send, msg_size, partner);
-            if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+            if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                 nrep = i;
             }
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
 
@@ -821,16 +830,16 @@ void run_strided_put_bidir_bw_test(strided_type_t strided)
             origin_stride = stride;
         }
 
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         for (i = 0; i < nrep; i++) {
             shmem_int_iput(target_recv, origin_send, target_stride,
                     origin_stride, MAX_COUNT, partner);
             shmem_fence();
-            if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+            if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
               nrep = i;
             }
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
 
@@ -901,15 +910,15 @@ void run_strided_get_bidir_bw_test(strided_type_t strided)
             origin_stride = stride;
         }
 
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         for (i = 0; i < nrep; i++) {
             shmem_int_iget(origin_recv, target_send, origin_stride,
                            target_stride, MAX_COUNT, partner);
-            if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+            if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
               nrep = i;
             }
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
 
@@ -981,17 +990,17 @@ void run_reduce_test(int separate_target)
         pWrk_size = (x1 > x2) ? x1 : x2;
         pWrk = shmalloc(pWrk_size * sizeof(*pWrk));
 
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         for (i = 0; i < nrep; i++) {
             shmem_int_sum_to_all(target_recv, origin_send, blksize,
                      0, 0, num_active_nodes, pWrk, pSync);
-            shmem_quiet();
-            //shmem_barrier_all();
-            if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+            //shmem_quiet();
+            shmem_barrier_all();
+            if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
               nrep = i;
             }
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         shfree(pWrk);
         stats[num_stats] = 1000000*(t2-t1)/(RED_NITER);
