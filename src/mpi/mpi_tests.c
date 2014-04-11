@@ -82,13 +82,11 @@ int main(int argc, char **argv)
 
     run_latency_test();
 
-    /*
     run_bw_test();
     run_bidir_bw_test();
 
     run_reduce_test(0);
     run_reduce_test(1);
-    */
 
     MPI_Finalize();
 }

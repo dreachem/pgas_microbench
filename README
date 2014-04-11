@@ -1,10 +1,20 @@
 PGAS Microbenchmarks
 
 These contains a set of simple microbenchmarks for various PGAS libraries and
-languages.
+languages, as well as for MPI.
+
+All the latency and bandwidth tests use communicating pairs. Therefore, these
+tests require an even number of processes to be launched. For N processes, the
+communicating pairs are { (1,N/2+1), ... , (N/2-1,N) }. The user decides how
+many processes to launch and the mapping of processes to the processors on the
+system.
+
+Also included, for some models, are AllReduce tests. These involve all
+processes in a sum-to-all reduction. This is currently available for CAF,
+SHMEM, GASNet, and MPI.
 
 
-TESTS:
+Description of Tests.
 
 -----------------------------------------------
 Put-Get Latency Test:
@@ -45,7 +55,7 @@ Bandwidth = M*N / (t2 - t1)
 
 -----------------------------------------------
 
-PUT Duplex Bandwidth Test:
+PUT Bidirectional Bandwidth Test:
 
 Pair of processes PUT M-sized message N times to eachother.
 
@@ -53,7 +63,7 @@ Bandwidth = M*N / (t2 - t1)    (take average)
 
 -----------------------------------------------
 
-GET Duplex Bandwidth Test:
+GET Bidirectional Bandwidth Test:
 
 Pair of processes GET M-sized message N times to eachother.
 
@@ -98,13 +108,3 @@ Reduction Test:
 - Reduction message of size M to non-overlapping target, N times
 
 - Reduction message of size M to same src buffer, N times
-
------------------------------------------------
-
-Reduction Test:
-
-- Reduction message of size M to non-overlapping target, N times, for subset
-  of PEs
-
-
-- Reduction message of size M to same src buffer, N times, for subset of PEs.
