@@ -9,7 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include <mpi.h>
 #include "gasnet.h"
 #include "gasnet_tools.h"
 #include "gasnet_vis.h"
@@ -334,6 +333,18 @@ void do_sync_wait(int partner)
  *                      LATENCY TESTS
  ********************************************************************/
 
+double get_Wtime()
+{
+    double t;
+    struct timeval tv;
+
+    gettimeofday(&tv, NULL);
+
+    t = (tv.tv_sec*1000000LL + tv.tv_usec)/1000000.0;
+
+    return t;
+}
+
 void run_putget_latency_test()
 {
     int *origin_send, *target_recv;
@@ -356,14 +367,14 @@ void run_putget_latency_test()
     }
 
     if (my_node < partner) {
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
             gasnet_put(partner, target_recv, origin_send,
                        sizeof(*target_recv));
             gasnet_get(origin_recv, partner, target_send,
                        sizeof(*target_recv));
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         stats[0] = 1000000*(t2-t1)/(LAT_NITER);
     }
@@ -403,25 +414,25 @@ void run_putput_latency_test(sync_type_t sync)
     }
 
     if (my_node < partner) {
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
             gasnet_put(partner, target_recv, origin_send,
                        sizeof(*target_recv));
             do_sync(sync);
             do_sync(sync);
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         stats[0] = 1000000*(t2-t1)/(LAT_NITER);
     } else if (my_node < num_active_nodes) {
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
             do_sync(sync);
             gasnet_put(partner, target_recv, origin_send,
                        sizeof(*target_recv));
             do_sync(sync);
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         stats[0] = 1000000*(t2-t1)/(LAT_NITER);
     }
@@ -462,25 +473,25 @@ void run_getget_latency_test(sync_type_t sync)
     }
 
     if (my_node < partner) {
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
             gasnet_get(origin_recv, partner, target_send,
                        sizeof(*target_send));
             do_sync(sync);
             do_sync(sync);
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         stats[0] = 1000000*(t2-t1)/(LAT_NITER);
     } else if (my_node < num_active_nodes) {
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
             do_sync(sync);
             gasnet_get(origin_recv, partner, target_send,
                        sizeof(*target_send));
             do_sync(sync);
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         stats[0] = 1000000*(t2-t1)/(LAT_NITER);
     }
@@ -532,23 +543,23 @@ void run_put_bw_test(int do_bulk)
 
         if (my_node < partner) {
             size_t msg_size = blksize * (sizeof *origin_send);
-            t1 = MPI_Wtime();
+            t1 = get_Wtime();
             if (do_bulk) {
                 for (i = 0; i < nrep; i++) {
                     gasnet_put_bulk(partner, target_recv, origin_send, msg_size);
-                    if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                    if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                       nrep = i;
                     }
                 }
             } else {
                 for (i = 0; i < nrep; i++) {
                     gasnet_put(partner, target_recv, origin_send, msg_size);
-                    if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                    if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                       nrep = i;
                     }
                 }
             }
-            t2 = MPI_Wtime();
+            t2 = get_Wtime();
 
             stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
         }
@@ -602,24 +613,24 @@ void run_get_bw_test(do_bulk)
 
         if (my_node < partner) {
             size_t msg_size = blksize * (sizeof *target_send);
-            t1 = MPI_Wtime();
+            t1 = get_Wtime();
             if (do_bulk) {
                 for (i = 0; i < nrep; i++) {
                     gasnet_get_bulk(origin_recv, partner, target_send,
                                     msg_size);
-                    if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                    if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                       nrep = i;
                     }
                 }
             } else {
                 for (i = 0; i < nrep; i++) {
                     gasnet_get(origin_recv, partner, target_send, msg_size);
-                    if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                    if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                       nrep = i;
                     }
                 }
             }
-            t2 = MPI_Wtime();
+            t2 = get_Wtime();
 
             stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
         }
@@ -699,15 +710,15 @@ void run_strided_put_bw_test(strided_type_t strided)
             count[0] = sizeof *origin_send;
             count[1] = MAX_COUNT;
 
-            t1 = MPI_Wtime();
+            t1 = get_Wtime();
             for (i = 0; i < nrep; i++) {
                 gasnet_puts_bulk(partner, target_recv, target_strides,
                                  origin_send, origin_strides, count, 1);
-                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
             }
-            t2 = MPI_Wtime();
+            t2 = get_Wtime();
 
             stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
         }
@@ -787,16 +798,16 @@ void run_strided_get_bw_test(strided_type_t strided)
             count[0] = sizeof *target_send;
             count[1] = MAX_COUNT;
 
-            t1 = MPI_Wtime();
+            t1 = get_Wtime();
             for (i = 0; i < nrep; i++) {
                 gasnet_gets_bulk(origin_recv, origin_strides,
                         partner, target_send, target_strides,
                         count, 1);
-                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
             }
-            t2 = MPI_Wtime();
+            t2 = get_Wtime();
 
             stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
         }
@@ -854,23 +865,23 @@ void run_put_bidir_bw_test(int do_bulk)
         int nrep = BW_NITER;
         size_t msg_size = blksize * (sizeof *origin_send);
 
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         if (do_bulk) {
             for (i = 0; i < nrep; i++) {
                 gasnet_put_bulk(partner, target_recv, origin_send, msg_size);
-                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
             }
         } else {
             for (i = 0; i < nrep; i++) {
                 gasnet_put(partner, target_recv, origin_send, msg_size);
-                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
             }
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
 
@@ -922,23 +933,23 @@ void run_get_bidir_bw_test(int do_bulk)
         int nrep = BW_NITER;
         size_t msg_size = blksize * (sizeof *target_send);
 
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         if (do_bulk) {
             for (i = 0; i < nrep; i++) {
                 gasnet_get_bulk(origin_recv, partner, target_send, msg_size);
-                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
             }
         } else {
             for (i = 0; i < nrep; i++) {
                 gasnet_get(origin_recv, partner, target_send, msg_size);
-                if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+                if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
             }
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
 
@@ -1015,15 +1026,15 @@ void run_strided_put_bidir_bw_test(strided_type_t strided)
         count[0] = sizeof *origin_send;
         count[1] = MAX_COUNT;
 
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         for (i = 0; i < nrep; i++) {
             gasnet_puts_bulk(partner, target_recv, target_strides,
                              origin_send, origin_strides, count, 1);
-            if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+            if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
               nrep = i;
             }
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
 
@@ -1100,16 +1111,16 @@ void run_strided_get_bidir_bw_test(strided_type_t strided)
         count[0] = sizeof *target_send;
         count[1] = MAX_COUNT;
 
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         for (i = 0; i < nrep; i++) {
             gasnet_gets_bulk(origin_recv, origin_strides,
                     partner, target_send, target_strides,
                     count, 1);
-            if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+            if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
               nrep = i;
             }
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         stats[num_stats] = msg_size*nrep/(1024*1024*(t2-t1));
 
@@ -1172,17 +1183,17 @@ void run_reduce_test(int separate_target)
         int nrep = RED_NITER;
         size_t msg_size = blksize * (sizeof *origin_send);
 
-        t1 = MPI_Wtime();
+        t1 = get_Wtime();
         for (i = 0; i < nrep; i++) {
             gasnet_coll_reduce(GASNET_TEAM_ALL, 0, target_recv, origin_send, 0, 0,
                           sizeof(*origin_send), blksize, 0, 0, flags);
             gasnet_coll_broadcast(GASNET_TEAM_ALL, target_recv, 0, target_recv,
                           sizeof(*origin_send)*blksize, flags);
-            if (i % 10 == 0 && (MPI_Wtime() - t1) > TIMEOUT) {
+            if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
               nrep = i;
             }
         }
-        t2 = MPI_Wtime();
+        t2 = get_Wtime();
 
         stats[num_stats] = 1000000*(t2-t1)/(RED_NITER);
 
