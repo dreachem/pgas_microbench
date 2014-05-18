@@ -1,4 +1,5 @@
 FC = uhcaf
+#FC = ftn
 LD = $(FC)
 FFLAGS = --mpi
 LDFLAGS = $(FFLAGS)

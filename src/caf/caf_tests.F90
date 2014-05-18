@@ -1264,12 +1264,41 @@ program main
 
     implicit none
 
+    integer :: PO[*], nargs
+    character(len=20) :: arg
+    integer :: i
+
+    PO = 0
+
+    if (this_image() == 1) then
+        nargs = command_argument_count()
+        if (nargs /= 0) then
+            call get_command_argument(1, arg)
+            read (arg,'(i20)') PO
+            do i = 2, num_images()
+              PO[i] = PO
+            end do
+        end if
+    end if
+
+    sync all
+
     if (mod(num_images(), 2) /= 0) then
         error stop "use an even number of images"
+    else if (PO > 0 .and. mod(num_images(), 2*PO) /= 0) then
+        error stop "number of images must be a multiple of 2 * parter offset"
     end if
 
     num_active_images = num_images()
-    partner = 1 + mod(this_image()-1+num_active_images/2, num_active_images)
+    if (PO == 0) then
+        partner = 1 + mod(this_image()-1+num_active_images/2, num_active_images)
+    else
+        if (mod(this_image()-1,2*PO) < PO) then
+            partner = this_image() + PO
+        else
+            partner = this_image() - PO
+        end if
+    end if
 
     allocate ( stats_buffer(NUM_STATS)[*] )
 
