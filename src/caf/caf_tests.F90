@@ -57,6 +57,51 @@ module caf_microbenchmarks
     !                       LATENCY TESTS
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+    subroutine run_sync_latency_test(sync)
+        implicit none
+        integer :: sync
+        integer :: num_pairs
+        double precision :: t1, t2
+        double precision :: latency_other
+
+        integer :: ti, ni, i
+
+        ti = this_image()
+        ni = num_images()
+
+        num_pairs = num_active_images / 2
+
+        if (ti == 1) then
+            if (sync == BARRIER) then
+                write (*,'(//,"SYNC Latency: (",I0," pairs, ",A0,")")') &
+                    num_pairs, "barrier"
+            else
+                write (*,'(//, "SYNC Latency: (",I0," pairs, ",A0,")")') &
+                    num_pairs, "p2p"
+            end if
+        end if
+
+        t1 = MPI_WTIME()
+        do i = 1, LAT_NITER
+          call do_sync(sync)
+        end do
+        t2 = MPI_WTIME()
+
+        stats_buffer(1) = 1000000*(t2-t1)/(LAT_NITER)
+
+        sync all
+
+        if (ti == 1) then
+            ! collect stats from other active nodes
+            do i = 2, num_pairs
+              latency_other = stats_buffer(1)[i]
+              stats_buffer(1) = stats_buffer(1) + latency_other
+            end do
+            write (*, '(F20.8, " us")') stats_buffer(1)/num_pairs
+        end if
+
+    end subroutine run_sync_latency_test
+
     subroutine run_putget_latency_test()
         implicit none
         integer :: num_pairs
@@ -1228,6 +1273,8 @@ program main
 
     allocate ( stats_buffer(NUM_STATS)[*] )
 
+    call run_sync_latency_test(BARRIER)
+    call run_sync_latency_test(P2P)
     call run_putget_latency_test()
     call run_putput_latency_test(BARRIER)
     call run_putput_latency_test(P2P)
