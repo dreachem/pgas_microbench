@@ -91,7 +91,6 @@ int main(int argc, char **argv)
     sync_notify_buffer  = shmalloc(num_nodes * sizeof(sync_notify_buffer[0]));
 
     /* run tests */
-
     run_putget_latency_test();
     run_putput_latency_test(BARRIER);
     run_putput_latency_test(P2P);
@@ -206,8 +205,8 @@ double get_Wtime()
 
 void run_putget_latency_test()
 {
-    int *origin_send, *target_recv;
-    int *origin_recv, *target_send;
+    int *origin_send, *target_recv, *target_recv_r;
+    int *origin_recv, *target_send, *target_send_r;
     int i;
     int num_pairs;
     double t1, t2;
@@ -220,6 +219,10 @@ void run_putget_latency_test()
     target_send = send_buffer;
 
     stats = stats_buffer;
+#ifdef USE_SHMEM_PTR
+    target_recv_r = shmem_ptr(target_recv, partner);
+    target_send_r = shmem_ptr(target_send, partner);
+#endif
 
     if (my_node == 0) {
         printf("\n\nPut-Get Latency: (%d active pairs)\n", num_pairs);
@@ -228,11 +231,25 @@ void run_putget_latency_test()
     if (my_node < partner) {
         t1 = get_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
-            shmem_putmem(target_recv, origin_send, sizeof(*target_recv),
-                         partner);
-            shmem_quiet();
-            shmem_getmem(origin_recv, target_send, sizeof(*target_send),
-                         partner);
+#ifdef USE_SHMEM_PTR
+            if (target_recv_r) {
+                memcpy(target_recv_r, origin_send, sizeof(*target_recv));
+            } else
+#endif
+            {
+                shmem_putmem(target_recv, origin_send, sizeof(*target_recv),
+                        partner);
+                shmem_quiet();
+            }
+#ifdef USE_SHMEM_PTR
+            if (target_send_r) {
+                memcpy(origin_recv, target_send_r, sizeof(*target_send));
+            } else
+#endif
+            {
+                shmem_getmem(origin_recv, target_send, sizeof(*target_send),
+                        partner);
+            }
         }
         t2 = get_Wtime();
 
@@ -256,7 +273,7 @@ void run_putget_latency_test()
 
 void run_putput_latency_test(sync_type_t sync)
 {
-    int *origin_send, *target_recv;
+    int *origin_send, *target_recv, *target_recv_r;
     int i;
     int num_pairs;
     double t1, t2;
@@ -267,6 +284,9 @@ void run_putput_latency_test(sync_type_t sync)
     target_recv = recv_buffer;
 
     stats = stats_buffer;
+#ifdef USE_SHMEM_PTR
+    target_recv_r = shmem_ptr(target_recv, partner);
+#endif
 
     if (my_node == 0) {
         printf("\n\nPut-Put Latency: (%d active pairs, %s)\n",
@@ -276,8 +296,15 @@ void run_putput_latency_test(sync_type_t sync)
     if (my_node < partner) {
         t1 = get_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
-            shmem_putmem(target_recv, origin_send, sizeof(*target_recv),
-                         partner);
+#ifdef USE_SHMEM_PTR
+            if (target_recv_r) {
+                memcpy(target_recv_r, origin_send, sizeof(*target_recv));
+            } else
+#endif
+            {
+                shmem_putmem(target_recv, origin_send, sizeof(*target_recv),
+                        partner);
+            }
             do_sync(sync);
             do_sync(sync);
         }
@@ -288,8 +315,15 @@ void run_putput_latency_test(sync_type_t sync)
         t1 = get_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
             do_sync(sync);
-            shmem_putmem(target_recv, origin_send, sizeof(*target_recv),
-                         partner);
+#ifdef USE_SHMEM_PTR
+            if (target_recv_r) {
+                memcpy(target_recv_r, origin_send, sizeof(*target_recv));
+            } else
+#endif
+            {
+                shmem_putmem(target_recv, origin_send, sizeof(*target_recv),
+                        partner);
+            }
             do_sync(sync);
         }
         t2 = get_Wtime();
@@ -315,7 +349,7 @@ void run_putput_latency_test(sync_type_t sync)
 
 void run_getget_latency_test(sync_type_t sync)
 {
-    int *origin_recv, *target_send;
+    int *origin_recv, *target_send, *target_send_r;
     int num_pairs;
     int i;
     double t1, t2;
@@ -326,6 +360,9 @@ void run_getget_latency_test(sync_type_t sync)
     target_send = send_buffer;
 
     stats = stats_buffer;
+#ifdef USE_SHMEM_PTR
+    target_send_r = shmem_ptr(target_send, partner);
+#endif
 
     if (my_node == 0) {
         printf("\n\nGet-Get Latency: (%d active pairs, %s)\n",
@@ -335,8 +372,15 @@ void run_getget_latency_test(sync_type_t sync)
     if (my_node < partner) {
         t1 = get_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
-            shmem_getmem(origin_recv, target_send, sizeof(*target_send),
-                         partner);
+#ifdef USE_SHMEM_PTR
+            if (target_send_r) {
+                memcpy(origin_recv, target_send_r, sizeof(*target_send));
+            } else
+#endif
+            {
+                shmem_getmem(origin_recv, target_send, sizeof(*target_send),
+                        partner);
+            }
             do_sync(sync);
             do_sync(sync);
         }
@@ -347,8 +391,15 @@ void run_getget_latency_test(sync_type_t sync)
         t1 = get_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
             do_sync(sync);
-            shmem_getmem(origin_recv, target_send, sizeof(*target_send),
-                         partner);
+#ifdef USE_SHMEM_PTR
+            if (target_send_r) {
+                memcpy(origin_recv, target_send_r, sizeof(*target_send));
+            } else
+#endif
+            {
+                shmem_getmem(origin_recv, target_send, sizeof(*target_send),
+                        partner);
+            }
             do_sync(sync);
         }
         t2 = get_Wtime();
@@ -377,7 +428,7 @@ void run_getget_latency_test(sync_type_t sync)
 
 void run_put_bw_test()
 {
-    int *origin_send, *target_recv;
+    int *origin_send, *target_recv, *target_recv_r;
     double t1, t2;
     int num_stats;
     int num_pairs;
@@ -390,6 +441,9 @@ void run_put_bw_test()
     target_recv = recv_buffer;
 
     stats = stats_buffer;
+#ifdef USE_SHMEM_PTR
+    target_recv_r = shmem_ptr(target_recv, partner);
+#endif
 
     if (my_node == 0) {
         printf("\n\n1-way Put Bandwidth: (%d pairs)\n",
@@ -405,8 +459,17 @@ void run_put_bw_test()
             size_t msg_size = blksize * (sizeof *origin_send);
             t1 = get_Wtime();
             for (i = 0; i < nrep; i++) {
-                shmem_putmem(target_recv, origin_send, msg_size, partner);
-                shmem_fence();
+#ifdef USE_SHMEM_PTR
+                if (target_recv_r) {
+                    memcpy(target_recv_r, origin_send, msg_size);
+                }
+                else
+#endif
+                {
+                    shmem_putmem(target_recv, origin_send, msg_size, partner);
+                    shmem_fence();
+                }
+
                 if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
@@ -438,7 +501,7 @@ void run_put_bw_test()
 
 void run_get_bw_test()
 {
-    int *origin_recv, *target_send;
+    int *origin_recv, *target_send, *target_send_r;
     double t1, t2;
     int num_pairs;
     int num_stats;
@@ -451,6 +514,9 @@ void run_get_bw_test()
     target_send = send_buffer;
 
     stats = stats_buffer;
+#ifdef USE_SHMEM_PTR
+    target_send_r = shmem_ptr(target_send, partner);
+#endif
 
     if (my_node == 0) {
         printf("\n\n1-way Get Bandwidth (%d pairs):\n",
@@ -466,7 +532,15 @@ void run_get_bw_test()
             size_t msg_size = blksize * (sizeof *target_send);
             t1 = get_Wtime();
             for (i = 0; i < nrep; i++) {
-                shmem_getmem(origin_recv, target_send, msg_size, partner);
+#ifdef USE_SHMEM_PTR
+                if (target_send_r) {
+                    memcpy(origin_recv, target_send_r, msg_size);
+                }
+                else
+#endif
+                {
+                    shmem_getmem(origin_recv, target_send, msg_size, partner);
+                }
                 if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
@@ -498,7 +572,7 @@ void run_get_bw_test()
 
 void run_strided_put_bw_test(strided_type_t strided)
 {
-    int *origin_send, *target_recv;
+    int *origin_send, *target_recv, *target_recv_r;
     double t1, t2;
     int num_stats;
     int num_pairs;
@@ -513,6 +587,9 @@ void run_strided_put_bw_test(strided_type_t strided)
     target_recv = recv_buffer;
 
     stats = stats_buffer;
+#ifdef USE_SHMEM_PTR
+    target_recv_r = shmem_ptr(target_recv, partner);
+#endif
 
     if (my_node == 0) {
         printf("\n\n1-way %s Put Bandwidth: (%d pairs)\n",
@@ -547,9 +624,23 @@ void run_strided_put_bw_test(strided_type_t strided)
 
             t1 = get_Wtime();
             for (i = 0; i < nrep; i++) {
-                shmem_int_iput(target_recv, origin_send, target_stride,
-                               origin_stride, MAX_COUNT, partner);
-                shmem_fence();
+#ifdef USE_SHMEM_PTR
+                if (target_recv_r) {
+                    int j, k1, k2;
+                    k1 = 0;
+                    k2 = 0;
+                    for (j = 0; j < MAX_COUNT; j++) {
+                        target_recv_r[k1] = origin_send[k2];
+                        k1 += target_stride;
+                        k2 += origin_stride;
+                    }
+                } else
+#endif
+                {
+                    shmem_int_iput(target_recv, origin_send, target_stride,
+                                   origin_stride, MAX_COUNT, partner);
+                    shmem_fence();
+                }
                 if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
@@ -582,7 +673,7 @@ void run_strided_put_bw_test(strided_type_t strided)
 
 void run_strided_get_bw_test(strided_type_t strided)
 {
-    int *origin_recv, *target_send;
+    int *origin_recv, *target_send, *target_send_r;
     double t1, t2;
     int num_stats;
     int num_pairs;
@@ -597,6 +688,9 @@ void run_strided_get_bw_test(strided_type_t strided)
     target_send = send_buffer;
 
     stats = stats_buffer;
+#ifdef USE_SHMEM_PTR
+    target_send_r = shmem_ptr(target_send, partner);
+#endif
 
     if (my_node == 0) {
         printf("\n\n1-way %s Get Bandwidth: (%d pairs)\n",
@@ -631,8 +725,22 @@ void run_strided_get_bw_test(strided_type_t strided)
 
             t1 = get_Wtime();
             for (i = 0; i < nrep; i++) {
-                shmem_int_iget(origin_recv, target_send, origin_stride,
-                               target_stride, MAX_COUNT, partner);
+#ifdef USE_SHMEM_PTR
+                if (target_send_r) {
+                    int j, k1, k2;
+                    k1 = 0;
+                    k2 = 0;
+                    for (j = 0; j < MAX_COUNT; j++) {
+                        origin_recv[k1] = target_send_r[k2];
+                        k1 += target_stride;
+                        k2 += origin_stride;
+                    }
+                } else
+#endif
+                {
+                    shmem_int_iget(origin_recv, target_send, origin_stride,
+                            target_stride, MAX_COUNT, partner);
+                }
                 if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                   nrep = i;
                 }
@@ -668,7 +776,7 @@ void run_strided_get_bw_test(strided_type_t strided)
 
 void run_put_bidir_bw_test()
 {
-    int *origin_send, *target_recv;
+    int *origin_send, *target_recv, *target_recv_r;
     double t1, t2;
     int num_pairs;
     int num_stats;
@@ -681,6 +789,9 @@ void run_put_bidir_bw_test()
     target_recv = recv_buffer;
 
     stats = stats_buffer;
+#ifdef USE_SHMEM_PTR
+    target_recv_r = shmem_ptr(target_recv, partner);
+#endif
 
     if (my_node == 0) {
         printf("\n\n2-way Put Bandwidth: (%d pairs)\n",
@@ -695,8 +806,16 @@ void run_put_bidir_bw_test()
 
         t1 = get_Wtime();
         for (i = 0; i < nrep; i++) {
-            shmem_putmem(target_recv, origin_send, msg_size, partner);
-            shmem_fence();
+#ifdef USE_SHMEM_PTR
+            if (target_recv_r) {
+                memcpy(target_recv_r, origin_send, msg_size);
+            }
+            else
+#endif
+            {
+                shmem_putmem(target_recv, origin_send, msg_size, partner);
+                shmem_fence();
+            }
             if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
               nrep = i;
             }
@@ -727,7 +846,7 @@ void run_put_bidir_bw_test()
 
 void run_get_bidir_bw_test()
 {
-    int *origin_recv, *target_send;
+    int *origin_recv, *target_send, *target_send_r;
     double t1, t2;
     int num_pairs;
     int num_stats;
@@ -740,6 +859,9 @@ void run_get_bidir_bw_test()
     target_send = send_buffer;
 
     stats = stats_buffer;
+#ifdef USE_SHMEM_PTR
+    target_send_r = shmem_ptr(target_send, partner);
+#endif
 
     if (my_node == 0) {
         printf("\n\n2-way Get Bandwidth (%d pairs):\n",
@@ -754,7 +876,15 @@ void run_get_bidir_bw_test()
 
         t1 = get_Wtime();
         for (i = 0; i < nrep; i++) {
-            shmem_getmem(origin_recv, target_send, msg_size, partner);
+#ifdef USE_SHMEM_PTR
+            if (target_send_r) {
+                memcpy(origin_recv, target_send_r, msg_size);
+            }
+            else
+#endif
+            {
+                shmem_getmem(origin_recv, target_send, msg_size, partner);
+            }
             if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
                 nrep = i;
             }
@@ -785,7 +915,7 @@ void run_get_bidir_bw_test()
 
 void run_strided_put_bidir_bw_test(strided_type_t strided)
 {
-    int *origin_send, *target_recv;
+    int *origin_send, *target_recv, *target_recv_r;
     double t1, t2;
     int num_stats;
     int num_pairs;
@@ -800,6 +930,9 @@ void run_strided_put_bidir_bw_test(strided_type_t strided)
     target_recv = recv_buffer;
 
     stats = stats_buffer;
+#ifdef USE_SHMEM_PTR
+    target_recv_r = shmem_ptr(target_recv, partner);
+#endif
 
     if (my_node == 0) {
         printf("\n\n2-way %s Put Bandwidth: (%d pairs)\n",
@@ -832,9 +965,23 @@ void run_strided_put_bidir_bw_test(strided_type_t strided)
 
         t1 = get_Wtime();
         for (i = 0; i < nrep; i++) {
-            shmem_int_iput(target_recv, origin_send, target_stride,
-                    origin_stride, MAX_COUNT, partner);
-            shmem_fence();
+#ifdef USE_SHMEM_PTR
+            if (target_recv_r) {
+                int j, k1, k2;
+                k1 = 0;
+                k2 = 0;
+                for (j = 0; j < MAX_COUNT; j++) {
+                    target_recv_r[k1] = origin_send[k2];
+                    k1 += target_stride;
+                    k2 += origin_stride;
+                }
+            } else
+#endif
+            {
+                shmem_int_iput(target_recv, origin_send, target_stride,
+                        origin_stride, MAX_COUNT, partner);
+                shmem_fence();
+            }
             if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
               nrep = i;
             }
@@ -865,7 +1012,7 @@ void run_strided_put_bidir_bw_test(strided_type_t strided)
 
 void run_strided_get_bidir_bw_test(strided_type_t strided)
 {
-    int *origin_recv, *target_send;
+    int *origin_recv, *target_send, *target_send_r;
     double t1, t2;
     int num_stats;
     int num_pairs;
@@ -880,6 +1027,9 @@ void run_strided_get_bidir_bw_test(strided_type_t strided)
     target_send = send_buffer;
 
     stats = stats_buffer;
+#ifdef USE_SHMEM_PTR
+    target_send_r = shmem_ptr(target_send, partner);
+#endif
 
     if (my_node == 0) {
         printf("\n\n2-way %s Get Bandwidth: (%d pairs)\n",
@@ -912,8 +1062,22 @@ void run_strided_get_bidir_bw_test(strided_type_t strided)
 
         t1 = get_Wtime();
         for (i = 0; i < nrep; i++) {
-            shmem_int_iget(origin_recv, target_send, origin_stride,
-                           target_stride, MAX_COUNT, partner);
+#ifdef USE_SHMEM_PTR
+            if (target_send_r) {
+                int j, k1, k2;
+                k1 = 0;
+                k2 = 0;
+                for (j = 0; j < MAX_COUNT; j++) {
+                    origin_recv[k1] = target_send_r[k2];
+                    k1 += target_stride;
+                    k2 += origin_stride;
+                }
+            } else
+#endif
+            {
+                shmem_int_iget(origin_recv, target_send, origin_stride,
+                        target_stride, MAX_COUNT, partner);
+            }
             if (i % 10 == 0 && (get_Wtime() - t1) > TIMEOUT) {
               nrep = i;
             }
