@@ -1,4 +1,6 @@
-PGAS Microbenchmarks
+------------------------------------
+HPCTools PGAS Microbenchmark Suite
+------------------------------------
 
 These contains a set of simple microbenchmarks for various PGAS libraries and
 languages, as well as for MPI.
