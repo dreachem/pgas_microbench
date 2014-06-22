@@ -1,22 +1,41 @@
 ------------------------------------
-HPCTools PGAS Microbenchmark Suite
+PGAS Microbenchmark Suite
 ------------------------------------
 
-These contains a set of simple microbenchmarks for various PGAS libraries and
-languages, as well as for MPI.
+HPCTools Group
+University of Houston
 
-All the latency and bandwidth tests use communicating pairs. Therefore, these
-tests require an even number of processes to be launched. For N processes, the
-communicating pairs are { (1,N/2+1), ... , (N/2-1,N) }. The user decides how
-many processes to launch and the mapping of processes to the processors on the
-system.
 
-Also included, for some models, are AllReduce tests. These involve all
+The PGAS Microbenchmark Suite contains a set of microbenchmarks for various
+PGAS libraries and languages, as well as for MPI.  All the latency and
+bandwidth tests use communicating pairs. Therefore, these tests require an
+even number of processes to be launched.
+
+For N processes, the communicating pairs by default are:
+
+  {i, N/2+i}, for i = 0 .. N/2-1
+
+The user may also optionally specify a partner offset argument on the
+command line to control which processes communication with eachother for the
+point-to-point microbenchmark tests. For example, for running the GASNet tests
+with N processes and a partner offset of Q:
+
+  gasnetrun_ibv -n N ./gasnet_tests Q
+
+the communicating pairs would be:
+
+  {i, i+Q}, for i in [0, N/2-1] where i mod 2*Q <  Q
+  {i-Q, i}, for i in [0, N/2-1] where i mod 2*Q >= Q
+
+
+Also included, for some models, are reduction tests. These involve all
 processes in a sum-to-all reduction. This is currently available for CAF,
 SHMEM, GASNet, and MPI.
 
 
-Description of Tests.
+=====================
+DESCRIPTION OF TESTS
+=====================
 
 -----------------------------------------------
 Put-Get Latency Test:
@@ -26,6 +45,7 @@ PUT small message to target address and then GET from target address N times.
 Latency = (t2 - t1) / N
 
 -----------------------------------------------
+
 Put-Put Latency Test:
 
 PUT small message to target address, synchronize with target, and then wait
@@ -34,6 +54,7 @@ for partner to do the same to me. Do this N times.
 Latency = (t2 - t1) / N
 
 -----------------------------------------------
+
 Get-Get Latency Test:
 
 GET small message to target address, synchronize with target, and then wait
@@ -42,6 +63,7 @@ for partner to do the same to me. Do this N times.
 Latency = (t2 - t1) / N
 
 ----------------------------------------------
+
 PUT Bandwidth Test:
 
 PUT M-sized message N times.
@@ -49,6 +71,7 @@ PUT M-sized message N times.
 Bandwidth =  M*N / (t2 - t1)
 
 -----------------------------------------------
+
 GET Bandwidth Test
 
 GET M-sized message N times.
