@@ -47,7 +47,6 @@ const int NUM_STATS = 32;
 
 int my_node;
 int num_nodes;
-int num_active_nodes;
 int partner;
 static int *send_buffer;
 static int *recv_buffer;
@@ -90,9 +89,8 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    num_active_nodes = num_nodes;
     if (partner_offset == 0) {
-        partner = (my_node+num_active_nodes/2) % num_active_nodes;
+        partner = (my_node+num_nodes/2) % num_nodes;
     } else {
         if ((my_node % (2*partner_offset)) < partner_offset) {
             partner = my_node + partner_offset;
@@ -133,7 +131,7 @@ void run_latency_test()
     double t1, t2;
     double *stats;
 
-    num_pairs = num_active_nodes / 2;
+    num_pairs = num_nodes / 2;
     origin_send = send_buffer;
     target_recv = recv_buffer;
     origin_recv = recv_buffer;
@@ -142,7 +140,7 @@ void run_latency_test()
     stats = stats_buffer;
 
     if (my_node == 0) {
-        printf("\n\nLatency: (%d active pairs)\n", num_pairs);
+        printf("\n\nLatency: (%d pairs)\n", num_pairs);
     }
 
     if (my_node < partner) {
@@ -163,7 +161,7 @@ void run_latency_test()
 
 
     if (my_node == 0) {
-        /* collect stats from other active nodes */
+        /* collect stats from other nodes */
         for (i = 1; i < num_pairs; i++) {
             double latency_other;
             MPI_Recv(&latency_other, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, &status);
@@ -191,7 +189,7 @@ void run_bw_test()
     size_t blksize;
     double *stats;
 
-    num_pairs = num_active_nodes / 2;
+    num_pairs = num_nodes / 2;
     origin_send = send_buffer;
     target_recv = recv_buffer;
 
@@ -262,7 +260,7 @@ void run_bidir_bw_test()
     size_t blksize;
     double *stats;
 
-    num_pairs = num_active_nodes / 2;
+    num_pairs = num_nodes / 2;
     origin_send = send_buffer;
     target_recv = recv_buffer;
 
@@ -309,7 +307,7 @@ void run_bidir_bw_test()
 
         if (my_node == 0) {
             /* collect stats from other nodes */
-            for (i = 1; i < num_active_nodes; i++) {
+            for (i = 1; i < num_nodes; i++) {
                 double bw_other;
                 MPI_Recv(&bw_other, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, &status);
                 stats[num_stats] += bw_other;
@@ -317,8 +315,8 @@ void run_bidir_bw_test()
 
             printf("%20ld %20ld %17.3f MB/s\n",
                     (long)blksize, (long)nrep,
-                    stats[num_stats]/num_active_nodes);
-        } else if (my_node < num_active_nodes) {
+                    stats[num_stats]/num_nodes);
+        } else if (my_node < num_nodes) {
             MPI_Send(&stats[num_stats], 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
         }
         num_stats++;
@@ -383,7 +381,7 @@ void run_reduce_test(int separate_target)
 
         if (my_node == 0) {
             /* collect stats from other nodes */
-            for (i = 1; i < num_active_nodes; i++) {
+            for (i = 1; i < num_nodes; i++) {
                 double lat_other;
                 MPI_Recv(&lat_other, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, &status);
                 stats[num_stats] += lat_other;
@@ -391,8 +389,8 @@ void run_reduce_test(int separate_target)
 
             printf("%20ld %20ld %17.3f us\n",
                     (long)blksize, (long)nrep,
-                    stats[num_stats]/num_active_nodes);
-        } else if (my_node < num_active_nodes) {
+                    stats[num_stats]/num_nodes);
+        } else if (my_node < num_nodes) {
             MPI_Send(&stats[num_stats], 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
         }
         num_stats++;

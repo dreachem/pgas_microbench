@@ -56,7 +56,6 @@ const int NUM_STATS = 32;
 
 int my_node;
 int num_nodes;
-int num_active_nodes;
 int partner;
 void **seginfo;
 
@@ -92,12 +91,6 @@ int main(int argc, char **argv)
         ARMCI_Error("not enough nodes running", 0);
     }
 
-    if (num_nodes % 2 == 0) {
-        num_active_nodes = num_nodes;
-    } else {
-        num_active_nodes = num_nodes - 1;
-    }
-    partner = (my_node + num_active_nodes/2) % num_active_nodes;
 
     /* get segment info and allocate */
     seginfo = malloc( sizeof(*seginfo) * num_nodes);
@@ -129,13 +122,12 @@ int main(int argc, char **argv)
 
     ARMCI_Barrier();
 
-    num_active_nodes = num_nodes;
     if (my_node == 0) {
        int nargs = argc;
        if (nargs > 1) {
            int i;
            *partner_offset_p = atoi(argv[1]);
-           partner = (my_node + num_active_nodes/2) % num_active_nodes;
+           partner = (my_node + num_nodes/2) % num_nodes;
            for (i = 1; i < num_nodes; i += 1) {
                int *target_p = REMOTE_ADDRESS(partner_offset_p, i);
                ARMCI_Put(partner_offset_p, target_p,
@@ -155,9 +147,8 @@ int main(int argc, char **argv)
                     "offset.\n", 0);
     }
 
-    num_active_nodes = num_nodes;
     if (partner_offset == 0) {
-        partner = (my_node+num_active_nodes/2) % num_active_nodes;
+        partner = (my_node+num_nodes/2) % num_nodes;
     } else {
         if ((my_node % (2*partner_offset)) < partner_offset) {
             partner = my_node + partner_offset;
@@ -223,7 +214,7 @@ void p2psync_test()
         printf("%d waiting on sync from %d\n", my_node, partner);
         do_sync_wait(partner);
         printf("%d received sync from %d\n", my_node, partner);
-    } else if (my_node < num_active_nodes) {
+    } else if (my_node < num_nodes) {
         printf("%d waiting on sync from %d\n", my_node, partner);
         do_sync_wait(partner);
         printf("%d received sync from %d\n", my_node, partner);
@@ -292,7 +283,7 @@ void run_putget_latency_test()
     double t1, t2;
     double *stats;
 
-    num_pairs = num_active_nodes / 2;
+    num_pairs = num_nodes / 2;
     origin_send = send_buffer;
     target_recv = REMOTE_ADDRESS(recv_buffer, partner);
     origin_recv = recv_buffer;
@@ -301,7 +292,7 @@ void run_putget_latency_test()
     stats = stats_buffer;
 
     if (my_node == 0) {
-        printf("\n\nPut-Get Latency: (%d active pairs)\n", num_pairs);
+        printf("\n\nPut-Get Latency: (%d pairs)\n", num_pairs);
     }
 
     if (my_node < partner) {
@@ -320,7 +311,7 @@ void run_putget_latency_test()
     ARMCI_Barrier();
 
     if (my_node == 0) {
-        /* collect stats from other active nodes */
+        /* collect stats from other nodes */
         for (i = 1; i < num_pairs; i++) {
             double latency_other;
             double *stats_other = REMOTE_ADDRESS(stats, i);
@@ -340,14 +331,14 @@ void run_putput_latency_test(sync_type_t sync)
     double t1, t2;
     double *stats;
 
-    num_pairs = num_active_nodes / 2;
+    num_pairs = num_nodes / 2;
     origin_send = send_buffer;
     target_recv = REMOTE_ADDRESS(recv_buffer, partner);
 
     stats = stats_buffer;
 
     if (my_node == 0) {
-        printf("\n\nPut-Put Latency: (%d active pairs, %s)\n",
+        printf("\n\nPut-Put Latency: (%d pairs, %s)\n",
                 num_pairs, (sync == BARRIER) ? "barrier" : "p2p");
     }
 
@@ -362,7 +353,7 @@ void run_putput_latency_test(sync_type_t sync)
         t2 = MPI_Wtime();
 
         stats[0] = 1000000*(t2-t1)/(LAT_NITER);
-    } else if (my_node < num_active_nodes) {
+    } else if (my_node < num_nodes) {
         t1 = MPI_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
             do_sync(sync);
@@ -379,7 +370,7 @@ void run_putput_latency_test(sync_type_t sync)
 
     if (my_node == 0) {
         /* collect stats from other nodes */
-        for (i = 1; i < num_active_nodes; i++) {
+        for (i = 1; i < num_nodes; i++) {
             double latency_other;
             double *stats_other = REMOTE_ADDRESS(stats, i);
             ARMCI_Get(stats_other, &latency_other, sizeof(latency_other),
@@ -387,7 +378,7 @@ void run_putput_latency_test(sync_type_t sync)
             stats[0] += latency_other;
         }
         printf("%20.8lf us\n",
-                stats[0]/(num_active_nodes));
+                stats[0]/(num_nodes));
     }
 }
 
@@ -399,14 +390,14 @@ void run_getget_latency_test(sync_type_t sync)
     double t1, t2;
     double *stats;
 
-    num_pairs = num_active_nodes / 2;
+    num_pairs = num_nodes / 2;
     origin_recv = recv_buffer;
     target_send = REMOTE_ADDRESS(send_buffer, partner);
 
     stats = stats_buffer;
 
     if (my_node == 0) {
-        printf("\n\nGet-Get Latency: (%d active pairs, %s)\n",
+        printf("\n\nGet-Get Latency: (%d pairs, %s)\n",
                 num_pairs, (sync == BARRIER) ? "barrier" : "p2p");
     }
 
@@ -421,7 +412,7 @@ void run_getget_latency_test(sync_type_t sync)
         t2 = MPI_Wtime();
 
         stats[0] = 1000000*(t2-t1)/(LAT_NITER);
-    } else if (my_node < num_active_nodes) {
+    } else if (my_node < num_nodes) {
         t1 = MPI_Wtime();
         for (i = 0; i < LAT_NITER; i++) {
             do_sync(sync);
@@ -438,14 +429,14 @@ void run_getget_latency_test(sync_type_t sync)
 
     if (my_node == 0) {
         /* collect stats from other nodes */
-        for (i = 1; i < num_active_nodes; i++) {
+        for (i = 1; i < num_nodes; i++) {
             double latency_other;
             double *stats_other = REMOTE_ADDRESS(stats, i);
             ARMCI_Get(stats_other, &latency_other, sizeof(latency_other),
                       i);
             stats[0] += latency_other;
         }
-        printf("%20.8lf us\n", stats[0]/num_active_nodes);
+        printf("%20.8lf us\n", stats[0]/num_nodes);
     }
 }
 
@@ -464,7 +455,7 @@ void run_put_bw_test()
     size_t blksize;
     double *stats;
 
-    num_pairs = num_active_nodes / 2;
+    num_pairs = num_nodes / 2;
     origin_send = send_buffer;
     target_recv = REMOTE_ADDRESS(recv_buffer, partner);
 
@@ -524,7 +515,7 @@ void run_get_bw_test()
     size_t blksize;
     double *stats;
 
-    num_pairs = num_active_nodes / 2;
+    num_pairs = num_nodes / 2;
     origin_recv = recv_buffer;
     target_send = REMOTE_ADDRESS(send_buffer, partner);
 
@@ -588,7 +579,7 @@ void run_strided_put_bw_test(strided_type_t strided)
     size_t stride;
     double *stats;
 
-    num_pairs = num_active_nodes / 2;
+    num_pairs = num_nodes / 2;
     origin_send = send_buffer;
     target_recv = REMOTE_ADDRESS(recv_buffer, partner);
 
@@ -675,7 +666,7 @@ void run_strided_get_bw_test(strided_type_t strided)
     size_t stride;
     double *stats;
 
-    num_pairs = num_active_nodes / 2;
+    num_pairs = num_nodes / 2;
     origin_recv = recv_buffer;
     target_send = REMOTE_ADDRESS(send_buffer, partner);
 
@@ -764,7 +755,7 @@ void run_put_bidir_bw_test()
     size_t blksize;
     double *stats;
 
-    num_pairs = num_active_nodes / 2;
+    num_pairs = num_nodes / 2;
     origin_send = send_buffer;
     target_recv = REMOTE_ADDRESS(recv_buffer, partner);
 
@@ -796,7 +787,7 @@ void run_put_bidir_bw_test()
 
         if (my_node == 0) {
             /* collect stats from other nodes */
-            for (i = 1; i < num_active_nodes; i++) {
+            for (i = 1; i < num_nodes; i++) {
                 double bw_other;
                 double *stats_other = REMOTE_ADDRESS(stats, i);
                 ARMCI_Get(&stats_other[num_stats], &bw_other,
@@ -806,7 +797,7 @@ void run_put_bidir_bw_test()
 
             printf("%20ld %20ld %17.3f MB/s\n",
                     (long)blksize, (long)nrep,
-                    stats[num_stats]/num_active_nodes);
+                    stats[num_stats]/num_nodes);
         }
         num_stats++;
     }
@@ -822,7 +813,7 @@ void run_get_bidir_bw_test()
     size_t blksize;
     double *stats;
 
-    num_pairs = num_active_nodes / 2;
+    num_pairs = num_nodes / 2;
     origin_recv = recv_buffer;
     target_send = REMOTE_ADDRESS(send_buffer, partner);
 
@@ -855,7 +846,7 @@ void run_get_bidir_bw_test()
 
         if (my_node == 0) {
             /* collect stats from other nodes */
-            for (i = 1; i < num_active_nodes; i++) {
+            for (i = 1; i < num_nodes; i++) {
                 double bw_other;
                 double *stats_other = REMOTE_ADDRESS(stats, i);
                 ARMCI_Get(&stats_other[num_stats], &bw_other,
@@ -865,7 +856,7 @@ void run_get_bidir_bw_test()
 
             printf("%20ld %20ld %17.3f MB/s\n",
                     (long)blksize, (long)nrep,
-                    stats[num_stats]/num_active_nodes);
+                    stats[num_stats]/num_nodes);
         }
 
         num_stats++;
@@ -884,7 +875,7 @@ void run_strided_put_bidir_bw_test(strided_type_t strided)
     size_t stride;
     double *stats;
 
-    num_pairs = num_active_nodes / 2;
+    num_pairs = num_nodes / 2;
     origin_send = send_buffer;
     target_recv = REMOTE_ADDRESS(recv_buffer, partner);
 
@@ -939,7 +930,7 @@ void run_strided_put_bidir_bw_test(strided_type_t strided)
 
         if (my_node == 0) {
             /* collect stats from other nodes */
-            for (i = 1; i < num_active_nodes; i++) {
+            for (i = 1; i < num_nodes; i++) {
                 double bw_other;
                 double *stats_other = REMOTE_ADDRESS(stats, i);
                 ARMCI_Get(&stats_other[num_stats], &bw_other,
@@ -950,7 +941,7 @@ void run_strided_put_bidir_bw_test(strided_type_t strided)
             printf("%20ld %20ld %20ld %17.3f MB/s\n",
                     (long)MAX_COUNT, (long)stride,
                     (long)nrep,
-                    stats[num_stats]/num_active_nodes);
+                    stats[num_stats]/num_nodes);
         }
         num_stats++;
     }
@@ -968,7 +959,7 @@ void run_strided_get_bidir_bw_test(strided_type_t strided)
     size_t stride;
     double *stats;
 
-    num_pairs = num_active_nodes / 2;
+    num_pairs = num_nodes / 2;
     origin_recv = recv_buffer;
     target_send = REMOTE_ADDRESS(send_buffer, partner);
 
@@ -1023,7 +1014,7 @@ void run_strided_get_bidir_bw_test(strided_type_t strided)
 
         if (my_node == 0) {
             /* collect stats from other nodes */
-            for (i = 1; i < num_active_nodes; i++) {
+            for (i = 1; i < num_nodes; i++) {
                 double bw_other;
                 double *stats_other = REMOTE_ADDRESS(stats, i);
                 ARMCI_Get(&stats_other[num_stats], &bw_other,
@@ -1034,7 +1025,7 @@ void run_strided_get_bidir_bw_test(strided_type_t strided)
             printf("%20ld %20ld %20ld %17.3f MB/s\n",
                     (long)MAX_COUNT, (long)stride,
                     (long)nrep,
-                    stats[num_stats]/num_active_nodes);
+                    stats[num_stats]/num_nodes);
         }
         num_stats++;
     }

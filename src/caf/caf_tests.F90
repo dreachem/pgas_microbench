@@ -34,7 +34,7 @@ module caf_microbenchmarks
     double precision, allocatable :: stats_buffer(:)[:]
 
     integer :: partner
-    integer :: num_active_images
+    integer :: numi
 
     contains
 
@@ -69,7 +69,7 @@ module caf_microbenchmarks
         ti = this_image()
         ni = num_images()
 
-        num_pairs = num_active_images / 2
+        num_pairs = numi / 2
 
         if (ti == 1) then
             if (sync == BARRIER) then
@@ -92,7 +92,7 @@ module caf_microbenchmarks
         sync all
 
         if (ti == 1) then
-            ! collect stats from other active nodes
+            ! collect stats from other nodes
             do i = 2, num_pairs
               latency_other = stats_buffer(1)[i]
               stats_buffer(1) = stats_buffer(1) + latency_other
@@ -113,7 +113,7 @@ module caf_microbenchmarks
         ti = this_image()
         ni = num_images()
 
-        num_pairs = num_active_images / 2
+        num_pairs = numi / 2
 
         if (ti == 1) then
             write (*,'(//,"Put-Get Latency: (",I0," pairs)")') &
@@ -134,7 +134,7 @@ module caf_microbenchmarks
         sync all
 
         if (ti == 1) then
-            ! collect stats from other active nodes
+            ! collect stats from other nodes
             do i = 2, num_pairs
               latency_other = stats_buffer(1)[i]
               stats_buffer(1) = stats_buffer(1) + latency_other
@@ -157,7 +157,7 @@ module caf_microbenchmarks
         ti = this_image()
         ni = num_images()
 
-        num_pairs = num_active_images / 2
+        num_pairs = numi / 2
 
         if (ti == 1) then
             if (sync == BARRIER) then
@@ -179,7 +179,7 @@ module caf_microbenchmarks
             t2 = MPI_WTIME()
 
             stats_buffer(1) = 1000000*(t2-t1)/(LAT_NITER)
-        else if (ti <= num_active_images) then
+        else if (ti <= numi) then
             t1 = MPI_WTIME()
             do i = 1, LAT_NITER
               call do_sync(sync)
@@ -194,12 +194,12 @@ module caf_microbenchmarks
         sync all
 
         if (ti == 1) then
-            ! collect stats from other active nodes
-            do i = 2, num_active_images
+            ! collect stats from other nodes
+            do i = 2, numi
               latency_other = stats_buffer(1)[i]
               stats_buffer(1) = stats_buffer(1) + latency_other
             end do
-            write (*, '(F20.8, " us")') stats_buffer(1)/num_active_images
+            write (*, '(F20.8, " us")') stats_buffer(1)/numi
         end if
 
     end subroutine run_putput_latency_test
@@ -217,7 +217,7 @@ module caf_microbenchmarks
         ti = this_image()
         ni = num_images()
 
-        num_pairs = num_active_images / 2
+        num_pairs = numi / 2
 
         if (ti == 1) then
             if (sync == BARRIER) then
@@ -239,7 +239,7 @@ module caf_microbenchmarks
             t2 = MPI_WTIME()
 
             stats_buffer(1) = 1000000*(t2-t1)/(LAT_NITER)
-        else if (ti <= num_active_images) then
+        else if (ti <= numi) then
             t1 = MPI_WTIME()
             do i = 1, LAT_NITER
               call do_sync(sync)
@@ -254,12 +254,12 @@ module caf_microbenchmarks
         sync all
 
         if (ti == 1) then
-            ! collect stats from other active nodes
-            do i = 2, num_active_images
+            ! collect stats from other nodes
+            do i = 2, numi
               latency_other = stats_buffer(1)[i]
               stats_buffer(1) = stats_buffer(1) + latency_other
             end do
-            write (*, '(F20.8, " us")') stats_buffer(1)/num_active_images
+            write (*, '(F20.8, " us")') stats_buffer(1)/numi
         end if
 
     end subroutine run_getget_latency_test
@@ -279,7 +279,7 @@ module caf_microbenchmarks
 
         ti = this_image()
         ni = num_images()
-        num_pairs = num_active_images / 2
+        num_pairs = numi / 2
 
         if (ti == 1) then
             write (*,'(//,"1-Way Put Bandwith: (",I0," pairs)")') &
@@ -335,7 +335,7 @@ module caf_microbenchmarks
 
         ti = this_image()
         ni = num_images()
-        num_pairs = num_active_images / 2
+        num_pairs = numi / 2
 
         if (ti == 1) then
             write (*,'(//,"1-Way Get Bandwith: (",I0," pairs)")') &
@@ -392,7 +392,7 @@ module caf_microbenchmarks
 
         ti = this_image()
         ni = num_images()
-        num_pairs = num_active_images / 2
+        num_pairs = numi / 2
 
         if (ti == 1) then
             write (*,'(//,"Random Put Bandwith")')
@@ -456,7 +456,7 @@ module caf_microbenchmarks
 
         ti = this_image()
         ni = num_images()
-        num_pairs = num_active_images / 2
+        num_pairs = numi / 2
 
         if (ti == 1) then
             write (*,'(//,"Random Get Bandwith")')
@@ -524,7 +524,7 @@ module caf_microbenchmarks
 
         ti = this_image()
         ni = num_images()
-        num_pairs = num_active_images / 2
+        num_pairs = numi / 2
 
         if (ti == 1) then
             strided_label(1) = "Target Strided"
@@ -616,7 +616,7 @@ module caf_microbenchmarks
 
         ti = this_image()
         ni = num_images()
-        num_pairs = num_active_images / 2
+        num_pairs = numi / 2
 
         if (ti == 1) then
             strided_label(1) = "Target Strided"
@@ -706,7 +706,7 @@ module caf_microbenchmarks
 
         ti = this_image()
         ni = num_images()
-        num_pairs = num_active_images / 2
+        num_pairs = numi / 2
 
         if (ti == 1) then
             write (*,'(//,"2-Way Put Bandwith: (",I0," pairs)")') &
@@ -735,12 +735,12 @@ module caf_microbenchmarks
           sync all
 
           if (ti == 1) then
-              do i = 2, num_active_images
+              do i = 2, numi
                   stats_buffer(num_stats) = stats_buffer(num_stats) + &
                                             stats_buffer(num_stats)[i]
               end do
               write (*, '(I20,I20,F17.3, " MB/s")') &
-                     blksize, nrep, stats_buffer(num_stats)/num_active_images
+                     blksize, nrep, stats_buffer(num_stats)/numi
           end if
 
           num_stats = num_stats + 1
@@ -759,7 +759,7 @@ module caf_microbenchmarks
 
         ti = this_image()
         ni = num_images()
-        num_pairs = num_active_images / 2
+        num_pairs = numi / 2
 
         if (ti == 1) then
             write (*,'(//,"2-Way Get Bandwith: (",I0," pairs)")') &
@@ -788,12 +788,12 @@ module caf_microbenchmarks
           sync all
 
           if (ti == 1) then
-              do i = 2, num_active_images
+              do i = 2, numi
                   stats_buffer(num_stats) = stats_buffer(num_stats) + &
                                             stats_buffer(num_stats)[i]
               end do
               write (*, '(I20,I20,F17.3, " MB/s")') &
-                     blksize, nrep, stats_buffer(num_stats)/num_active_images
+                     blksize, nrep, stats_buffer(num_stats)/numi
           end if
 
           num_stats = num_stats + 1
@@ -819,7 +819,7 @@ module caf_microbenchmarks
 
         ti = this_image()
         ni = num_images()
-        num_pairs = num_active_images / 2
+        num_pairs = numi / 2
 
         if (ti == 1) then
             strided_label(1) = "Target Strided"
@@ -878,13 +878,13 @@ module caf_microbenchmarks
           sync all
 
           if (ti == 1) then
-              do i = 2, num_active_images
+              do i = 2, numi
                   stats_buffer(num_stats) = stats_buffer(num_stats) + &
                                             stats_buffer(num_stats)[i]
               end do
               write (*, '(I20,I20,I20,F17.3, " MB/s")') &
                      MAX_COUNT, stride, nrep, &
-                     stats_buffer(num_stats)/num_active_images
+                     stats_buffer(num_stats)/numi
           end if
 
           num_stats = num_stats + 1
@@ -910,7 +910,7 @@ module caf_microbenchmarks
 
         ti = this_image()
         ni = num_images()
-        num_pairs = num_active_images / 2
+        num_pairs = numi / 2
 
         if (ti == 1) then
             strided_label(1) = "Target Strided"
@@ -969,13 +969,13 @@ module caf_microbenchmarks
           sync all
 
           if (ti == 1) then
-              do i = 2, num_active_images
+              do i = 2, numi
                   stats_buffer(num_stats) = stats_buffer(num_stats) + &
                                             stats_buffer(num_stats)[i]
               end do
               write (*, '(I20,I20,I20,F17.3, " MB/s")') &
                      MAX_COUNT, stride, nrep, &
-                     stats_buffer(num_stats)/num_active_images
+                     stats_buffer(num_stats)/numi
           end if
 
           num_stats = num_stats + 1
@@ -1003,7 +1003,7 @@ module caf_microbenchmarks
 
         ti = this_image()
         ni = num_images()
-        num_pairs = num_active_images / 2
+        num_pairs = numi / 2
 
         if (ti == 1) then
             strided_label(1) = "Target Strided"
@@ -1114,7 +1114,7 @@ module caf_microbenchmarks
 
         ti = this_image()
         ni = num_images()
-        num_pairs = num_active_images / 2
+        num_pairs = numi / 2
 
         if (ti == 1) then
             strided_label(1) = "Target Strided"
@@ -1289,9 +1289,9 @@ program main
         error stop "number of images must be a multiple of 2 * parter offset"
     end if
 
-    num_active_images = num_images()
+    numi = num_images()
     if (PO == 0) then
-        partner = 1 + mod(this_image()-1+num_active_images/2, num_active_images)
+        partner = 1 + mod(this_image()-1+numi/2, numi)
     else
         if (mod(this_image()-1,2*PO) < PO) then
             partner = this_image() + PO
