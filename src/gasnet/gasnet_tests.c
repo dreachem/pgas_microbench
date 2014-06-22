@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <sys/time.h>
 #include "gasnet.h"
 #include "gasnet_tools.h"
 #include "gasnet_vis.h"
@@ -76,6 +77,9 @@ static int *recv_buffer;
 static double *stats_buffer;
 static int *sync_notify_buffer;
 
+static int partner_offset;
+static int *partner_offset_p;
+
 #define REMOTE_ADDRESS(a,p) \
     (a) + ((char *)seginfo[(p)].addr - (char*)segment_start)/(sizeof *(a))
 
@@ -133,18 +137,10 @@ int main(int argc, char **argv)
     my_node   = gasnet_mynode();
     num_nodes = gasnet_nodes();
 
-
     if (num_nodes < 2) {
         fprintf(stderr, "not enough nodes running\n");
         gasnet_exit(1);
     }
-
-    if (num_nodes % 2 == 0) {
-        num_active_nodes = num_nodes;
-    } else {
-        num_active_nodes = num_nodes - 1;
-    }
-    partner = (my_node + num_active_nodes/2) % num_active_nodes;
 
     /* attach segment */
     ret = gasnet_attach(handlers, nhandlers,
@@ -184,6 +180,52 @@ int main(int argc, char **argv)
 
     /* initialize address of sync notify buffer */
     sync_notify_buffer = (int *) &stats_buffer[NUM_STATS + 1];
+
+    /* initialize address for partner_offset */
+    partner_offset_p = (int *) &sync_notify_buffer[num_nodes + 1];
+
+    gasnet_barrier_notify(0,0);
+    gasnet_barrier_wait(0,0);
+
+    num_active_nodes = num_nodes;
+    if (my_node == 0) {
+       int nargs = argc;
+       if (nargs > 1) {
+           int i;
+           *partner_offset_p = atoi(argv[1]);
+           partner = (my_node + num_active_nodes/2) % num_active_nodes;
+           for (i = 1; i < num_nodes; i += 1) {
+               int *target_p = REMOTE_ADDRESS(partner_offset_p, i);
+               gasnet_put(i, target_p, partner_offset_p,
+                          sizeof(*partner_offset_p));
+           }
+       }
+    }
+
+    gasnet_barrier_notify(0,0);
+    gasnet_barrier_wait(0,0);
+
+    partner_offset = *partner_offset_p;
+
+    if (num_nodes % 2 != 0) {
+        fprintf(stderr, "Number of processes should be even.\n");
+        gasnet_exit(1);
+    } else if (partner_offset > 0 && (num_nodes % (2*partner_offset) != 0)) {
+        fprintf(stderr, "Number of processes must be a multiple of 2 * partner "
+               "offset.\n");
+        gasnet_exit(1);
+    }
+
+    num_active_nodes = num_nodes;
+    if (partner_offset == 0) {
+        partner = (my_node+num_active_nodes/2) % num_active_nodes;
+    } else {
+        if ((my_node % (2*partner_offset)) < partner_offset) {
+            partner = my_node + partner_offset;
+        } else {
+            partner = my_node - partner_offset;
+        }
+    }
 
     /* run tests */
 

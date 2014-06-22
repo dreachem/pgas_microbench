@@ -54,24 +54,52 @@ static int *recv_buffer;
 static double *stats_buffer;
 static int *sync_notify_buffer;
 
+static int partner_offset;
+
 
 int main(int argc, char **argv)
 {
     int ret;
     double t1, t2, t3;
+    int nargs;
+    int i;
 
     MPI_Init(&argc, &argv);
 
     MPI_Comm_rank(MPI_COMM_WORLD, &my_node);
     MPI_Comm_size(MPI_COMM_WORLD, &num_nodes);
 
+    partner_offset = 0;
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (my_node == 0) {
+       int nargs = argc;
+       if (nargs > 1) {
+           partner_offset = atoi(argv[1]);
+       }
+    }
+    MPI_Bcast(&partner_offset, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
     if (num_nodes % 2 != 0) {
-        fprintf(stderr, "Number of PEs should be even.\n");
+        fprintf(stderr, "Number of ranks should be even.\n");
+        exit(1);
+    } else if (partner_offset > 0 && (num_nodes % (2*partner_offset) != 0)) {
+        fprintf(stderr, "Number of ranks should be a multiple of 2 * partner "
+               "offset.\n");
         exit(1);
     }
 
     num_active_nodes = num_nodes;
-    partner = (my_node + num_active_nodes/2) % num_active_nodes;
+    if (partner_offset == 0) {
+        partner = (my_node+num_active_nodes/2) % num_active_nodes;
+    } else {
+        if ((my_node % (2*partner_offset)) < partner_offset) {
+            partner = my_node + partner_offset;
+        } else {
+            partner = my_node - partner_offset;
+        }
+    }
 
     send_buffer         = malloc(MAX_MSG_SIZE);
     recv_buffer         = malloc(MAX_MSG_SIZE);

@@ -65,11 +65,16 @@ static int *recv_buffer;
 static double *stats_buffer;
 static int *sync_notify_buffer;
 
+static int partner_offset;
+
+long p_sync[_SHMEM_BCAST_SYNC_SIZE];
+
 
 int main(int argc, char **argv)
 {
     int ret;
     double t1, t2, t3;
+    int i;
 
     /* start up SHMEM */
     start_pes(0);
@@ -77,13 +82,40 @@ int main(int argc, char **argv)
     my_node       = _my_pe();
     num_nodes     = _num_pes();
 
+    partner_offset = 0;
+
+    for (i = 0; i < _SHMEM_BCAST_SYNC_SIZE; i += 1) {
+        p_sync[i] = _SHMEM_SYNC_VALUE;
+    }
+    shmem_barrier_all();
+
+    if (my_node == 0) {
+       int nargs = argc;
+       if (nargs > 1) {
+           partner_offset = atoi(argv[1]);
+       }
+    }
+    shmem_broadcast32(&partner_offset, &partner_offset, 1, 0, 0, 0, num_nodes, p_sync);
+
     if (num_nodes % 2 != 0) {
         fprintf(stderr, "Number of PEs should be even.\n");
+        exit(1);
+    } else if (partner_offset > 0 && (num_nodes % (2*partner_offset) != 0)) {
+        fprintf(stderr, "Number of PEs must be a multiple of 2 * partner "
+               "offset.\n");
         exit(1);
     }
 
     num_active_nodes = num_nodes;
-    partner = (my_node + num_active_nodes/2) % num_active_nodes;
+    if (partner_offset == 0) {
+        partner = (my_node+num_active_nodes/2) % num_active_nodes;
+    } else {
+        if ((my_node % (2*partner_offset)) < partner_offset) {
+            partner = my_node + partner_offset;
+        } else {
+            partner = my_node - partner_offset;
+        }
+    }
 
     send_buffer         = shmalloc(MAX_MSG_SIZE);
     recv_buffer         = shmalloc(MAX_MSG_SIZE);
