@@ -7,7 +7,7 @@ University of Houston
 
 
 The PGAS Microbenchmark Suite contains a set of microbenchmarks for various
-PGAS libraries and languages, as well as for MPI.  All the latency and
+PGAS libraries and languages, as well as MPI for comparison purposes.  All the latency and
 bandwidth tests use communicating pairs. Therefore, these tests require an
 even number of processes to be launched.
 
